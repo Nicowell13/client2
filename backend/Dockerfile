@@ -1,12 +1,11 @@
-FROM node:18-alpine
+FROM node:18-bullseye-slim
 
 WORKDIR /app
 
-# System deps for Prisma on Alpine (musl)
-# - libc6-compat: glibc compatibility
-# - openssl / openssl1.1-compat: SSL libs required by Prisma engines
-RUN apk add --no-cache libc6-compat openssl || true \
-	&& apk add --no-cache openssl1.1-compat || true
+# System deps for Prisma on Debian
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
