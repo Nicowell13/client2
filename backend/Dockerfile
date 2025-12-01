@@ -2,11 +2,11 @@ FROM node:18-bullseye-slim
 
 WORKDIR /app
 
-# Install OpenSSL 3.x and other dependencies for Prisma
+# Install OpenSSL and other dependencies for Prisma
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
     openssl \
-    libssl3 \
+    libssl1.1 \
     ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
