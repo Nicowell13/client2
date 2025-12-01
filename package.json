@@ -1,0 +1,31 @@
+{
+  "name": "whatsapp-campaign-manager",
+  "version": "1.0.0",
+  "description": "WhatsApp Campaign Manager with Next.js, Express, WAHA, Redis, and PostgreSQL",
+  "main": "index.js",
+  "scripts": {
+    "setup": "powershell -ExecutionPolicy Bypass -File ./setup.ps1",
+    "dev": "docker-compose up",
+    "start": "docker-compose up -d",
+    "stop": "docker-compose down",
+    "logs": "docker-compose logs -f",
+    "restart": "docker-compose restart",
+    "clean": "docker-compose down -v",
+    "backend:logs": "docker-compose logs -f backend",
+    "frontend:logs": "docker-compose logs -f frontend",
+    "db:migrate": "docker exec whatsapp-backend npx prisma migrate deploy",
+    "db:studio": "docker exec whatsapp-backend npx prisma studio",
+    "db:backup": "docker exec whatsapp-postgres pg_dump -U whatsapp_user whatsapp_db > backup.sql"
+  },
+  "keywords": [
+    "whatsapp",
+    "campaign",
+    "marketing",
+    "automation",
+    "waha",
+    "nextjs",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT"
+}

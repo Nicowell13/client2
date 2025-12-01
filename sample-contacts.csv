@@ -1,0 +1,9 @@
+# Sample contacts CSV file
+# Format: name,phoneNumber,email
+
+name,phoneNumber,email
+John Doe,628123456789,john@example.com
+Jane Smith,628987654321,jane@example.com
+Bob Johnson,628111222333,bob@example.com
+Alice Williams,628444555666,alice@example.com
+Charlie Brown,628777888999,charlie@example.com

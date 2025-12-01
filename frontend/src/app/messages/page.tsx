@@ -1,0 +1,134 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
+import api from '@/lib/api';
+
+interface Message {
+  id: string;
+  status: string;
+  sentAt: string | null;
+  deliveredAt: string | null;
+  errorMsg: string | null;
+  contact: {
+    name: string;
+    phoneNumber: string;
+  };
+  campaign: {
+    name: string;
+  };
+}
+
+export default function MessagesPage() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMessages();
+    
+    // Auto-refresh every 10 seconds
+    const interval = setInterval(fetchMessages, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchMessages = async () => {
+    try {
+      const { data: campaigns } = await api.get('/api/campaigns');
+      const allMessages: Message[] = [];
+      
+      for (const campaign of campaigns.data) {
+        const { data: detail } = await api.get(`/api/campaigns/${campaign.id}`);
+        if (detail.data.messages) {
+          allMessages.push(...detail.data.messages);
+        }
+      }
+      
+      setMessages(allMessages);
+    } catch (error) {
+      console.error('Failed to load messages');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'sent':
+      case 'delivered':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <Link href="/" className="text-gray-600 hover:text-gray-900">
+              <ArrowLeft className="w-6 h-6" />
+            </Link>
+            <h1 className="text-3xl font-bold text-gray-900">Messages</h1>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow">
+          <div className="p-6 border-b">
+            <h2 className="text-xl font-semibold">All Messages ({messages.length})</h2>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="p-12 text-center text-gray-600">
+              No messages found. Send a campaign to see messages here.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Campaign</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sent At</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {messages.map((message) => (
+                    <tr key={message.id}>
+                      <td className="px-6 py-4">{message.campaign.name}</td>
+                      <td className="px-6 py-4">{message.contact.name}</td>
+                      <td className="px-6 py-4">{message.contact.phoneNumber}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(message.status)}`}>
+                          {message.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-500">
+                        {message.sentAt ? new Date(message.sentAt).toLocaleString() : '-'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-red-600">
+                        {message.errorMsg || '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

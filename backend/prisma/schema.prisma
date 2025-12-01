@@ -1,0 +1,113 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("user") // user, admin
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("users")
+}
+
+model Session {
+  id          String    @id @default(cuid())
+  name        String    @default("default")
+  sessionId   String    @unique
+  status      String    @default("stopped") // stopped, starting, working, failed
+  qrCode      String?
+  phoneNumber String?
+  isDefault   Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  campaigns   Campaign[]
+  
+  @@map("sessions")
+}
+
+model Contact {
+  id          String    @id @default(cuid())
+  name        String
+  phoneNumber String
+  email       String?
+  tags        String[]  @default([])
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  messages    Message[]
+  
+  @@unique([phoneNumber])
+  @@map("contacts")
+}
+
+model Campaign {
+  id          String    @id @default(cuid())
+  name        String
+  message     String    @db.Text
+  imageUrl    String?
+  status      String    @default("draft") // draft, scheduled, sending, sent, failed
+  sessionId   String
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  totalContacts Int     @default(0)
+  sentCount   Int       @default(0)
+  failedCount Int       @default(0)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  buttons     Button[]
+  messages    Message[]
+  
+  @@map("campaigns")
+}
+
+model Button {
+  id          String    @id @default(cuid())
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  label       String
+  url         String
+  order       Int       @default(1) // 1 or 2
+  
+  createdAt   DateTime  @default(now())
+  
+  @@map("buttons")
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  contactId   String
+  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  status      String    @default("pending") // pending, sent, delivered, failed
+  waMessageId String?
+  errorMsg    String?
+  
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  
+  @@map("messages")
+}
