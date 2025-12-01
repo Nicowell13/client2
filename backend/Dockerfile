@@ -2,9 +2,12 @@ FROM node:18-bullseye-slim
 
 WORKDIR /app
 
-# System deps for Prisma on Debian
+# Install OpenSSL 3.x and other dependencies for Prisma
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && apt-get install -y --no-install-recommends \
+    openssl \
+    libssl3 \
+    ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
@@ -17,7 +20,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Client with explicit binary target
 RUN npx prisma generate
 
 # Build TypeScript
