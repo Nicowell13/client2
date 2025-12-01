@@ -93,11 +93,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.watrix.online}
     container_name: whatsapp-frontend
     ports:
       - "3001:3001"
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:4000
       - PORT=3001
     depends_on:
       - backend
