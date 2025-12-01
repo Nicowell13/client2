@@ -8,8 +8,16 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
+# Check for Docker Compose (plugin or legacy)
+USE_DOCKER_COMPOSE_PLUGIN=false
+if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    USE_DOCKER_COMPOSE_PLUGIN=true
+    echo "✅ Docker Compose plugin detected"
+elif command -v docker-compose &> /dev/null; then
+    echo "✅ Legacy docker-compose detected"
+else
     echo "❌ Docker Compose is not installed. Please install Docker Compose first."
+    echo "   On Ubuntu: sudo apt install docker-compose-plugin"
     exit 1
 fi
 
@@ -24,7 +32,11 @@ fi
 
 # Build and start containers
 echo "🔨 Building and starting Docker containers..."
-docker-compose up -d --build
+if [ "$USE_DOCKER_COMPOSE_PLUGIN" = true ]; then
+    docker compose up -d --build
+else
+    docker-compose up -d --build
+fi
 
 # Wait for PostgreSQL to be ready
 echo "⏳ Waiting for PostgreSQL to be ready..."
@@ -44,8 +56,14 @@ echo "   Backend:   http://localhost:4000"
 echo "   WAHA:      http://localhost:3000"
 echo ""
 echo "🔧 Useful commands:"
-echo "   View logs:        docker-compose logs -f"
-echo "   Stop services:    docker-compose down"
-echo "   Restart services: docker-compose restart"
+if [ "$USE_DOCKER_COMPOSE_PLUGIN" = true ]; then
+    echo "   View logs:        docker compose logs -f"
+    echo "   Stop services:    docker compose down"
+    echo "   Restart services: docker compose restart"
+else
+    echo "   View logs:        docker-compose logs -f"
+    echo "   Stop services:    docker-compose down"
+    echo "   Restart services: docker-compose restart"
+fi
 echo ""
 echo "📖 For more information, read SETUP.md"
