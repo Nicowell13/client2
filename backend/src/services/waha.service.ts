@@ -13,9 +13,14 @@ class WahaService {
       baseURL: this.baseUrl,
       headers: {
         'Content-Type': 'application/json',
+        // Send both common header casings just in case
         ...(this.apiKey && { 'X-Api-Key': this.apiKey }),
+        ...(this.apiKey && { 'x-api-key': this.apiKey }),
       },
     });
+
+    // Minimal startup log to help diagnose 401s without leaking secrets
+    console.log('[WAHA] Base URL:', this.baseUrl, '| API key set:', !!this.apiKey);
   }
 
   // Session Management

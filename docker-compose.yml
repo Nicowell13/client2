@@ -79,6 +79,8 @@ services:
       - DATABASE_URL=postgresql://whatsapp_user:whatsapp_pass@postgres:5432/whatsapp_db
       - REDIS_URL=redis://redis:6379
       - WAHA_URL=http://waha:3000
+      # Ensure backend uses the same API key as WAHA
+      - WAHA_API_KEY=${WAHA_API_KEY:-116e0222dfb5d86824e45ee9488d931b2b8924b63eb3766e1fb633ef3c934289}
       - PORT=4000
     depends_on:
       - postgres
