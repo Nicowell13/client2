@@ -48,9 +48,23 @@ export default function SessionsPage() {
   const fetchSessions = async () => {
     try {
       const response = await sessionAPI.getAll();
-      setSessions(response.data || []);
-    } catch (error) {
+      const data = response.data;
+      
+      // Ensure sessions is always an array
+      if (Array.isArray(data)) {
+        setSessions(data);
+      } else if (data && Array.isArray(data.data)) {
+        setSessions(data.data);
+      } else if (data && data.success && Array.isArray(data.data)) {
+        setSessions(data.data);
+      } else {
+        console.warn('Unexpected sessions response format:', data);
+        setSessions([]);
+      }
+    } catch (error: any) {
       console.error('Failed to fetch sessions:', error);
+      toast.error(error.response?.data?.message || 'Failed to load sessions');
+      setSessions([]);
     } finally {
       setIsLoading(false);
     }
