@@ -15,6 +15,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     console.log(`[SESSION] Creating session: ${name}`);
 
+    // If session already exists in DB, return it directly
+    const existing = await prisma.session.findFirst({ where: { sessionId: name } });
+    if (existing) {
+      return res.json({ success: true, data: existing });
+    }
+
     // Start session with WAHA
     try {
       const wahaSession = await wahaService.startSession(name);
@@ -40,14 +46,20 @@ router.post('/', async (req: Request, res: Response) => {
       console.error(`[SESSION] WAHA error:`, wahaError.message);
       
       // Try to create session in DB even if WAHA fails (for retry later)
-      const session = await prisma.session.create({
-        data: {
-          name,
-          sessionId: name,
-          status: 'failed',
-          isDefault: true,
-        },
-      });
+      let session;
+      try {
+        session = await prisma.session.create({
+          data: {
+            name,
+            sessionId: name,
+            status: 'failed',
+            isDefault: true,
+          },
+        });
+      } catch (dbErr: any) {
+        // If already exists, return existing row
+        session = await prisma.session.findFirst({ where: { sessionId: name } });
+      }
 
       res.status(500).json({
         success: false,

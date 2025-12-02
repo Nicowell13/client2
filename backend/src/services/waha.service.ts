@@ -80,24 +80,30 @@ class WahaService {
   }
 
   async getSessionScreenshot(sessionName: string = 'default') {
-    try {
-      const response = await this.client.get(`/api/sessions/${sessionName}/screenshot`, {
-        responseType: 'json',
-        validateStatus: () => true,
-      });
+    const candidates = [
+      `/api/sessions/${sessionName}/screenshot`,
+      `/api/sessions/screenshot?session=${encodeURIComponent(sessionName)}`,
+      `/api/screenshot?session=${encodeURIComponent(sessionName)}`,
+    ];
 
-      if (response.status !== 200) {
-        console.error('[WAHA][SCREENSHOT] Non-200 response', {
-          status: response.status,
-          data: response.data,
+    let lastErr: any = null;
+    for (const path of candidates) {
+      try {
+        const response = await this.client.get(path, {
+          responseType: 'json',
+          validateStatus: () => true,
         });
-        throw new Error(`WAHA screenshot endpoint returned ${response.status}`);
+        if (response.status === 200) {
+          return response.data;
+        }
+        console.warn('[WAHA][SCREENSHOT] Fallback path returned', path, response.status);
+        lastErr = new Error(`status ${response.status}`);
+      } catch (e: any) {
+        console.warn('[WAHA][SCREENSHOT] Error calling', path, e.message);
+        lastErr = e;
       }
-
-      return response.data;
-    } catch (error: any) {
-      throw new Error(`Failed to get session screenshot: ${error.message}`);
     }
+    throw new Error(`Failed to get session screenshot: ${lastErr?.message || 'unknown error'}`);
   }
 
   async getSessionStatus(sessionName: string = 'default') {
