@@ -57,7 +57,22 @@ class WahaService {
 
   async getQRCode(sessionName: string = 'default') {
     try {
-      const response = await this.client.get(`/api/sessions/${sessionName}/qr`);
+      const response = await this.client.get(`/api/sessions/${sessionName}/qr`, {
+        validateStatus: () => true,
+      });
+
+      if (response.status !== 200) {
+        console.error('[WAHA][QR] Non-200 response', {
+          status: response.status,
+          data: response.data,
+        });
+        throw new Error(`WAHA QR endpoint returned ${response.status}`);
+      }
+
+      // Some WAHA versions return { qr: 'data:image/png;base64,...' } or { qr: 'ASCII Art' }
+      if (!response.data || !response.data.qr) {
+        console.warn('[WAHA][QR] Missing qr field in response', response.data);
+      }
       return response.data;
     } catch (error: any) {
       throw new Error(`Failed to get QR code: ${error.message}`);

@@ -12,11 +12,29 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
 
     // Handle session status updates
     if (event === 'session.status') {
+      // Attempt to extract QR code from payload variants
+      let qr: string | null = null;
+      if (payload) {
+        qr = payload.qr || payload.qrCode || null;
+        if (!qr && Array.isArray(payload.statuses)) {
+          for (const st of payload.statuses) {
+            if (st && (st.qr || st.qrCode)) {
+              qr = st.qr || st.qrCode;
+              break;
+            }
+          }
+        }
+      }
+
+      const updateData: any = { status: payload.status };
+      if (qr) {
+        updateData.qrCode = qr;
+        console.log('[Webhook][QR] Captured QR code for session', session);
+      }
+
       await prisma.session.updateMany({
         where: { sessionId: session },
-        data: {
-          status: payload.status,
-        },
+        data: updateData,
       });
     }
 

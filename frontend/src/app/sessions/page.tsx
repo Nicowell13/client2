@@ -91,12 +91,27 @@ export default function SessionsPage() {
   };
 
   const handleShowQR = async (session: Session) => {
+    // If we already have a QR stored (from webhook), use it immediately
+    if (session.qrCode) {
+      setSelectedSession(session);
+      setShowQRModal(true);
+      return;
+    }
+
+    setSelectedSession(session);
+    setShowQRModal(true);
+
     try {
       const response = await sessionAPI.getQR(session.id);
-      setSelectedSession({ ...session, qrCode: response.data.qrCode });
-      setShowQRModal(true);
-    } catch (error) {
+      const qr = response.data?.data?.qr || response.data?.qr || response.data?.qrCode;
+      if (qr) {
+        setSelectedSession({ ...session, qrCode: qr });
+      } else {
+        toast.error('QR code not available yet. Please wait a moment.');
+      }
+    } catch (error: any) {
       console.error('Failed to get QR code:', error);
+      toast.error(error.response?.data?.message || 'Failed to fetch QR code');
     }
   };
 
