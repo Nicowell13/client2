@@ -13,27 +13,53 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { name = 'default' } = req.body;
 
+    console.log(`[SESSION] Creating session: ${name}`);
+
     // Start session with WAHA
-    const wahaSession = await wahaService.startSession(name);
+    try {
+      const wahaSession = await wahaService.startSession(name);
+      console.log(`[SESSION] WAHA response:`, wahaSession);
 
-    // Save to database
-    const session = await prisma.session.create({
-      data: {
-        name,
-        sessionId: wahaSession.name || name,
-        status: 'starting',
-        isDefault: true,
-      },
-    });
+      // Save to database
+      const session = await prisma.session.create({
+        data: {
+          name,
+          sessionId: wahaSession.name || name,
+          status: 'starting',
+          isDefault: true,
+        },
+      });
 
-    res.json({
-      success: true,
-      data: session,
-    });
+      console.log(`[SESSION] Session created in DB:`, session.id);
+
+      res.json({
+        success: true,
+        data: session,
+      });
+    } catch (wahaError: any) {
+      console.error(`[SESSION] WAHA error:`, wahaError.message);
+      
+      // Try to create session in DB even if WAHA fails (for retry later)
+      const session = await prisma.session.create({
+        data: {
+          name,
+          sessionId: name,
+          status: 'failed',
+          isDefault: true,
+        },
+      });
+
+      res.status(500).json({
+        success: false,
+        message: `Failed to start WhatsApp session: ${wahaError.message}. Session saved for manual retry.`,
+        data: session,
+      });
+    }
   } catch (error: any) {
+    console.error(`[SESSION] Unexpected error:`, error);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message || 'Failed to create session',
     });
   }
 });
