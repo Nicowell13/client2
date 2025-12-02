@@ -79,6 +79,27 @@ class WahaService {
     }
   }
 
+  async getSessionScreenshot(sessionName: string = 'default') {
+    try {
+      const response = await this.client.get(`/api/sessions/${sessionName}/screenshot`, {
+        responseType: 'json',
+        validateStatus: () => true,
+      });
+
+      if (response.status !== 200) {
+        console.error('[WAHA][SCREENSHOT] Non-200 response', {
+          status: response.status,
+          data: response.data,
+        });
+        throw new Error(`WAHA screenshot endpoint returned ${response.status}`);
+      }
+
+      return response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to get session screenshot: ${error.message}`);
+    }
+  }
+
   async getSessionStatus(sessionName: string = 'default') {
     try {
       const response = await this.client.get(`/api/sessions/${sessionName}`);
