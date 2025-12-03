@@ -103,7 +103,8 @@ export default function SessionsPage() {
 
     try {
       const response = await sessionAPI.getQR(session.id);
-      const qr = response.data?.data?.qr || response.data?.qr || response.data?.qrCode;
+      const payload = response.data;
+      const qr = payload?.data?.qr || payload?.qr || payload?.qrCode || payload?.dataUrl || payload?.data;
       if (qr) {
         setSelectedSession({ ...session, qrCode: qr });
       } else {

@@ -157,16 +157,27 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
       });
     }
 
-    // Try WAHA QR endpoint first
+    // Try WAHA QR endpoint first, supporting multiple formats
     try {
-      const qrData = await wahaService.getQRCode(session.sessionId);
-      await prisma.session.update({
-        where: { id },
-        data: {
-          qrCode: qrData.qr || null,
-        },
-      });
-      return res.json({ success: true, data: qrData });
+      const qrResp = await wahaService.getQRCode(session.sessionId);
+      let dataUrl: string | null = null;
+      if (qrResp.format === 'json') {
+        const base64 = qrResp.data?.base64 || qrResp.data?.qr || qrResp.data?.image;
+        if (base64) {
+          dataUrl = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+        }
+      } else if (qrResp.format === 'png') {
+        dataUrl = qrResp.data;
+      } else if (qrResp.format === 'raw') {
+        // raw text value: render as QR via frontend component
+        dataUrl = qrResp.data; // not a data URL, but store raw and let UI handle
+      }
+
+      if (dataUrl) {
+        await prisma.session.update({ where: { id }, data: { qrCode: dataUrl } });
+        return res.json({ success: true, data: { qr: dataUrl } });
+      }
+      console.warn('[SESSION][QR] QR endpoint returned no image/base64, falling back to screenshot');
     } catch (qrErr: any) {
       console.warn('[SESSION][QR] QR endpoint failed, trying screenshot...', qrErr.message);
     }

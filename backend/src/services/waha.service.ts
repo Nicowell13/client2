@@ -56,24 +56,45 @@ class WahaService {
   }
 
   async getQRCode(sessionName: string = 'default') {
+    // New WAHA API: /api/{session}/auth/qr supports different formats
+    // Try JSON (base64), PNG (binary), then raw
     try {
-      const response = await this.client.get(`/api/sessions/${sessionName}/qr`, {
+      // 1) Try JSON -> base64
+      const jsonResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
+        headers: { accept: 'application/json' },
         validateStatus: () => true,
       });
-
-      if (response.status !== 200) {
-        console.error('[WAHA][QR] Non-200 response', {
-          status: response.status,
-          data: response.data,
-        });
-        throw new Error(`WAHA QR endpoint returned ${response.status}`);
+      if (jsonResp.status === 200 && jsonResp.data) {
+        return { format: 'json', data: jsonResp.data };
       }
 
-      // Some WAHA versions return { qr: 'data:image/png;base64,...' } or { qr: 'ASCII Art' }
-      if (!response.data || !response.data.qr) {
-        console.warn('[WAHA][QR] Missing qr field in response', response.data);
+      // 2) Try PNG binary
+      const pngResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
+        headers: { accept: 'image/png' },
+        responseType: 'arraybuffer',
+        validateStatus: () => true,
+      });
+      if (pngResp.status === 200 && pngResp.data) {
+        const base64 = Buffer.from(pngResp.data, 'binary').toString('base64');
+        return { format: 'png', data: `data:image/png;base64,${base64}` };
       }
-      return response.data;
+
+      // 3) Try raw QR value
+      const rawResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
+        headers: { accept: 'application/json' },
+        params: { format: 'raw' },
+        validateStatus: () => true,
+      });
+      if (rawResp.status === 200 && rawResp.data) {
+        return { format: 'raw', data: rawResp.data };
+      }
+
+      console.error('[WAHA][QR] All formats failed', {
+        jsonStatus: jsonResp.status,
+        pngStatus: pngResp.status,
+        rawStatus: rawResp.status,
+      });
+      throw new Error('WAHA QR endpoint returned non-200 for all formats');
     } catch (error: any) {
       throw new Error(`Failed to get QR code: ${error.message}`);
     }
