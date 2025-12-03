@@ -101,30 +101,37 @@ class WahaService {
   }
 
   async getSessionScreenshot(sessionName: string = 'default') {
-    const candidates = [
-      `/api/sessions/${sessionName}/screenshot`,
-      `/api/sessions/screenshot?session=${encodeURIComponent(sessionName)}`,
-      `/api/screenshot?session=${encodeURIComponent(sessionName)}`,
-    ];
-
-    let lastErr: any = null;
-    for (const path of candidates) {
-      try {
-        const response = await this.client.get(path, {
-          responseType: 'json',
-          validateStatus: () => true,
-        });
-        if (response.status === 200) {
-          return response.data;
-        }
-        console.warn('[WAHA][SCREENSHOT] Fallback path returned', path, response.status);
-        lastErr = new Error(`status ${response.status}`);
-      } catch (e: any) {
-        console.warn('[WAHA][SCREENSHOT] Error calling', path, e.message);
-        lastErr = e;
+    // Prefer official endpoint /api/screenshot?session=default
+    // First try JSON Base64File, then JPEG binary
+    const url = `/api/screenshot?session=${encodeURIComponent(sessionName)}`;
+    try {
+      const jsonResp = await this.client.get(url, {
+        headers: { accept: 'application/json' },
+        responseType: 'json',
+        validateStatus: () => true,
+      });
+      if (jsonResp.status === 200 && jsonResp.data) {
+        return { format: 'json', data: jsonResp.data };
       }
+
+      const jpegResp = await this.client.get(url, {
+        headers: { accept: 'image/jpeg' },
+        responseType: 'arraybuffer',
+        validateStatus: () => true,
+      });
+      if (jpegResp.status === 200 && jpegResp.data) {
+        const base64 = Buffer.from(jpegResp.data, 'binary').toString('base64');
+        return { format: 'jpeg', data: `data:image/jpeg;base64,${base64}` };
+      }
+
+      console.warn('[WAHA][SCREENSHOT] Non-200 for both JSON and JPEG', {
+        jsonStatus: jsonResp.status,
+        jpegStatus: jpegResp.status,
+      });
+      throw new Error('Screenshot endpoint returned non-200');
+    } catch (error: any) {
+      throw new Error(`Failed to get session screenshot: ${error.message}`);
     }
-    throw new Error(`Failed to get session screenshot: ${lastErr?.message || 'unknown error'}`);
   }
 
   async getSessionStatus(sessionName: string = 'default') {

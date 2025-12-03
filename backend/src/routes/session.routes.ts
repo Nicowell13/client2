@@ -182,34 +182,24 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
       console.warn('[SESSION][QR] QR endpoint failed, trying screenshot...', qrErr.message);
     }
 
-    // Fallback: use WAHA screenshot (base64 image)
+    // Fallback: use WAHA screenshot via official endpoint
     const shot = await wahaService.getSessionScreenshot(session.sessionId);
-    // Attempt common shapes: { base64 }, { file: { base64 } }, raw png
-    let base64: string | null = null;
-    if (typeof shot === 'string') {
-      base64 = shot;
-    } else if (shot?.base64) {
-      base64 = shot.base64;
-    } else if (shot?.file?.base64) {
-      base64 = shot.file.base64;
+    let dataUrl: string | null = null;
+
+    if (shot?.format === 'jpeg') {
+      dataUrl = shot.data; // already a data URL
+    } else if (shot?.format === 'json') {
+      const base64 = shot.data?.base64 || shot.data?.file?.base64 || null;
+      if (base64) {
+        dataUrl = base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
+      }
     }
 
-    if (!base64) {
-      return res.status(500).json({
-        success: false,
-        message: 'Screenshot did not contain base64 image',
-      });
+    if (!dataUrl) {
+      return res.status(500).json({ success: false, message: 'Screenshot did not contain image' });
     }
 
-    const dataUrl = base64.startsWith('data:')
-      ? base64
-      : `data:image/png;base64,${base64}`;
-
-    await prisma.session.update({
-      where: { id },
-      data: { qrCode: dataUrl },
-    });
-
+    await prisma.session.update({ where: { id }, data: { qrCode: dataUrl } });
     res.json({ success: true, data: { qr: dataUrl } });
   } catch (error: any) {
     res.status(500).json({
