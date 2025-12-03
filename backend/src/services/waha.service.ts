@@ -100,6 +100,29 @@ class WahaService {
     }
   }
 
+  async requestPairingCode(sessionName: string, phoneNumber: string) {
+    try {
+      const response = await this.client.post(`/api/${encodeURIComponent(sessionName)}/auth/request-code`, {
+        phoneNumber,
+      }, {
+        headers: { 'Content-Type': 'application/json' },
+        validateStatus: () => true,
+      });
+
+      if (response.status !== 200) {
+        console.error('[WAHA][PAIR] Non-200 response', {
+          status: response.status,
+          data: response.data,
+        });
+        throw new Error(`WAHA pairing endpoint returned ${response.status}`);
+      }
+
+      return response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to request pairing code: ${error.message}`);
+    }
+  }
+
   async getSessionScreenshot(sessionName: string = 'default') {
     // Prefer official endpoint /api/screenshot?session=default
     // First try JSON Base64File, then JPEG binary

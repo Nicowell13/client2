@@ -267,4 +267,28 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Request pairing code (fallback when QR is unavailable)
+router.post('/:id/request-code', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { phoneNumber } = req.body;
+
+    if (!phoneNumber) {
+      return res.status(400).json({ success: false, message: 'phoneNumber is required' });
+    }
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    const resp = await wahaService.requestPairingCode(session.sessionId, phoneNumber);
+    // WAHA returns code or sends SMS; just proxy the payload
+    return res.json({ success: true, data: resp });
+  } catch (error: any) {
+    console.error('[SESSION][PAIR] Error:', error.message);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to request pairing code' });
+  }
+});
+
 export default router;

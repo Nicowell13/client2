@@ -30,7 +30,8 @@ export default function SessionsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [newSessionName, setNewSessionName] = useState('');
+  // WAHA free supports only 'default' session
+  const [newSessionName] = useState('default');
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -71,20 +72,22 @@ export default function SessionsPage() {
   };
 
   const handleCreateSession = async () => {
-    if (!newSessionName.trim()) {
-      toast.error('Session name is required');
+    // Allow only one session ('default') on WAHA free
+    if (sessions.length >= 1) {
+      toast.error('Silakan hubungi admin untuk menambah sesi.');
+      setShowCreateModal(false);
       return;
     }
 
     setIsCreating(true);
     try {
-      await sessionAPI.create(newSessionName);
-      toast.success('Session created successfully!');
+      await sessionAPI.create('default');
+      toast.success('Sesi default berhasil dibuat!');
       setShowCreateModal(false);
-      setNewSessionName('');
       fetchSessions();
     } catch (error) {
       console.error('Failed to create session:', error);
+      toast.error('Gagal membuat sesi default');
     } finally {
       setIsCreating(false);
     }
@@ -270,25 +273,22 @@ export default function SessionsPage() {
       <Modal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        title="Create New Session"
+        title="Buat Sesi Default"
         footer={
           <>
             <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-              Cancel
+              Tutup
             </Button>
             <Button onClick={handleCreateSession} isLoading={isCreating}>
-              Create Session
+              Buat Sesi
             </Button>
           </>
         }
       >
-        <Input
-          label="Session Name"
-          placeholder="e.g., Main Account, Marketing, Support"
-          value={newSessionName}
-          onChange={(e) => setNewSessionName(e.target.value)}
-          required
-        />
+        <div className="space-y-2">
+          
+          <p className="text-gray-600">Jika Anda membutuhkan lebih dari satu sesi, silakan hubungi admin untuk peningkatan paket.</p>
+        </div>
       </Modal>
 
       {/* QR Code Modal */}
