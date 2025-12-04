@@ -30,10 +30,11 @@ export default function SessionsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [showPairingModal, setShowPairingModal] = useState(false);
   const [phoneInput, setPhoneInput] = useState('');
   const [requestingCode, setRequestingCode] = useState(false);
   const [qrWaitTimer, setQrWaitTimer] = useState<NodeJS.Timeout | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [statusPollTimer, setStatusPollTimer] = useState<NodeJS.Timeout | null>(null);
   // WAHA free supports only 'default' session
   const [newSessionName] = useState('default');
   const [isCreating, setIsCreating] = useState(false);
@@ -43,17 +44,23 @@ export default function SessionsPage() {
     fetchSessions();
   }, []);
 
-  // Cleanup timer when QR modal closed or component unmounts
+  // Cleanup timers when QR modal closed or component unmounts
   useEffect(() => {
     if (!showQRModal) {
       if (qrWaitTimer) {
         clearTimeout(qrWaitTimer);
         setQrWaitTimer(null);
       }
-      setShowPairingModal(false);
+      if (statusPollTimer) {
+        clearInterval(statusPollTimer);
+        setStatusPollTimer(null);
+      }
+      setPairingCode(null);
+      setPhoneInput('');
     }
     return () => {
       if (qrWaitTimer) clearTimeout(qrWaitTimer);
+      if (statusPollTimer) clearInterval(statusPollTimer);
     };
   }, [showQRModal]);
 
@@ -130,10 +137,32 @@ export default function SessionsPage() {
     const timer = setTimeout(() => {
       const hasQr = !!(selectedSession?.qrCode || session.qrCode);
       if (!hasQr) {
-        setShowPairingModal(true);
+        // Expose pairing input within QR modal (no separate modal)
+        // pairingCode is initially null; user can request code
       }
     }, 5000);
     setQrWaitTimer(timer);
+
+    // Begin status polling until connected
+    if (statusPollTimer) {
+      clearInterval(statusPollTimer);
+      setStatusPollTimer(null);
+    }
+    const poll = setInterval(async () => {
+      try {
+        const resp = await sessionAPI.getAll();
+        const list = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+        const updated = list.find((s: any) => s.id === session.id);
+        if (updated?.status === 'working') {
+          toast.success('Connected');
+          setSelectedSession(updated);
+          setShowQRModal(false);
+          clearInterval(poll);
+          setStatusPollTimer(null);
+        }
+      } catch (e) {}
+    }, 3000);
+    setStatusPollTimer(poll as unknown as NodeJS.Timeout);
 
     try {
       const response = await sessionAPI.getQR(session.id);
@@ -146,7 +175,7 @@ export default function SessionsPage() {
           clearTimeout(qrWaitTimer);
           setQrWaitTimer(null);
         }
-        setShowPairingModal(false);
+        // pairing input remains available; no separate modal to close
       } else {
         toast.error('QR code not available yet. Please wait a moment.');
       }
@@ -168,11 +197,12 @@ export default function SessionsPage() {
       const resp = await sessionAPI.requestPairingCode(selectedSession.id, phoneNumber);
       const code = resp?.data?.data?.code || resp?.data?.code;
       if (code) {
+        setPairingCode(code);
         toast.success(`Kode pairing: ${code}`);
       } else {
         toast.success('Permintaan kode pairing berhasil dikirim.');
       }
-      setShowPairingModal(false);
+      // Do not auto-close; wait until connected
     } catch (error: any) {
       console.error('Failed to request pairing code:', error);
       toast.error(error.response?.data?.message || 'Gagal meminta pairing code');
@@ -357,7 +387,7 @@ export default function SessionsPage() {
       <Modal
         isOpen={showQRModal}
         onClose={() => setShowQRModal(false)}
-        title="Scan QR Code"
+        title="Scan QR Code atau Minta Pairing Code"
         size="md"
       >
         <div className="text-center">
@@ -382,30 +412,23 @@ export default function SessionsPage() {
               <p className="mt-4 text-gray-600">Loading QR Code...</p>
             </div>
           )}
-        </div>
-      </Modal>
-
-      {/* Pairing Code Modal (fallback after 5s) */}
-      <Modal
-        isOpen={showPairingModal}
-        onClose={() => setShowPairingModal(false)}
-        title="Masukkan Nomor Telepon"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setShowPairingModal(false)}>Batal</Button>
-            <Button onClick={handleRequestPairingCode} isLoading={requestingCode}>Minta Kode Pairing</Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-gray-700">QR gagal dimunculkan. Silakan minta kode pairing via nomor telepon.</p>
-          <label className="text-sm font-medium text-gray-700">Nomor Telepon (contoh: 6281234567890)</label>
-          <Input
-            placeholder="Contoh: 6281234567890"
-            value={phoneInput}
-            onChange={(e) => setPhoneInput(e.target.value)}
-          />
-          <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda '+', misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
+          <div className="mt-8 text-left max-w-md mx-auto space-y-3">
+            <p className="text-sm text-gray-700">Jika QR gagal muncul atau Anda ingin pairing via kode:</p>
+            <label className="text-sm font-medium text-gray-700">Nomor Telepon (contoh: 6281234567890)</label>
+            <Input
+              placeholder="Contoh: 6281234567890"
+              value={phoneInput}
+              onChange={(e) => setPhoneInput(e.target.value)}
+            />
+            <div className="flex items-center gap-2">
+              <Button onClick={handleRequestPairingCode} isLoading={requestingCode}>Minta Kode Pairing</Button>
+              {pairingCode && (
+                <Badge variant="success">Kode: {pairingCode}</Badge>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda '+', misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
+            <p className="text-xs text-gray-500">Dialog ini akan tetap terbuka sampai status terhubung.</p>
+          </div>
         </div>
       </Modal>
     </div>
