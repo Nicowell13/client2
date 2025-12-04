@@ -109,8 +109,8 @@ class WahaService {
         validateStatus: () => true,
       });
 
-      if (response.status !== 200) {
-        console.error('[WAHA][PAIR] Non-200 response', {
+      if (response.status < 200 || response.status >= 300) {
+        console.error('[WAHA][PAIR] Non-2xx response', {
           status: response.status,
           data: response.data,
         });
