@@ -30,6 +30,10 @@ export default function SessionsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [showPairingModal, setShowPairingModal] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [requestingCode, setRequestingCode] = useState(false);
+  const [qrWaitTimer, setQrWaitTimer] = useState<NodeJS.Timeout | null>(null);
   // WAHA free supports only 'default' session
   const [newSessionName] = useState('default');
   const [isCreating, setIsCreating] = useState(false);
@@ -38,6 +42,20 @@ export default function SessionsPage() {
     checkAuth();
     fetchSessions();
   }, []);
+
+  // Cleanup timer when QR modal closed or component unmounts
+  useEffect(() => {
+    if (!showQRModal) {
+      if (qrWaitTimer) {
+        clearTimeout(qrWaitTimer);
+        setQrWaitTimer(null);
+      }
+      setShowPairingModal(false);
+    }
+    return () => {
+      if (qrWaitTimer) clearTimeout(qrWaitTimer);
+    };
+  }, [showQRModal]);
 
   const checkAuth = () => {
     const token = localStorage.getItem('token');
@@ -104,18 +122,62 @@ export default function SessionsPage() {
     setSelectedSession(session);
     setShowQRModal(true);
 
+    // Start a 5s timer; if QR still missing, show pairing modal
+    if (qrWaitTimer) {
+      clearTimeout(qrWaitTimer);
+      setQrWaitTimer(null);
+    }
+    const timer = setTimeout(() => {
+      const hasQr = !!(selectedSession?.qrCode || session.qrCode);
+      if (!hasQr) {
+        setShowPairingModal(true);
+      }
+    }, 5000);
+    setQrWaitTimer(timer);
+
     try {
       const response = await sessionAPI.getQR(session.id);
       const payload = response.data;
       const qr = payload?.data?.qr || payload?.qr || payload?.qrCode || payload?.dataUrl || payload?.data;
       if (qr) {
         setSelectedSession({ ...session, qrCode: qr });
+        // If QR arrives, ensure pairing modal is closed and timer cleared
+        if (qrWaitTimer) {
+          clearTimeout(qrWaitTimer);
+          setQrWaitTimer(null);
+        }
+        setShowPairingModal(false);
       } else {
         toast.error('QR code not available yet. Please wait a moment.');
       }
     } catch (error: any) {
       console.error('Failed to get QR code:', error);
       toast.error(error.response?.data?.message || 'Failed to fetch QR code');
+    }
+  };
+
+  const handleRequestPairingCode = async () => {
+    if (!selectedSession?.id) return;
+    const phoneNumber = phoneInput.trim();
+    if (!phoneNumber) {
+      toast.error('Masukkan nomor telepon dulu.');
+      return;
+    }
+    setRequestingCode(true);
+    try {
+      const resp = await sessionAPI.requestPairingCode(selectedSession.id, phoneNumber);
+      const code = resp?.data?.data?.code || resp?.data?.code;
+      if (code) {
+        toast.success(`Kode pairing: ${code}`);
+      } else {
+        toast.success('Permintaan kode pairing berhasil dikirim.');
+      }
+      setShowPairingModal(false);
+    } catch (error: any) {
+      console.error('Failed to request pairing code:', error);
+      toast.error(error.response?.data?.message || 'Gagal meminta pairing code');
+    } finally {
+      setRequestingCode(false);
     }
   };
 
@@ -320,6 +382,30 @@ export default function SessionsPage() {
               <p className="mt-4 text-gray-600">Loading QR Code...</p>
             </div>
           )}
+        </div>
+      </Modal>
+
+      {/* Pairing Code Modal (fallback after 5s) */}
+      <Modal
+        isOpen={showPairingModal}
+        onClose={() => setShowPairingModal(false)}
+        title="Masukkan Nomor Telepon"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowPairingModal(false)}>Batal</Button>
+            <Button onClick={handleRequestPairingCode} isLoading={requestingCode}>Minta Kode Pairing</Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-gray-700">QR gagal dimunculkan. Silakan minta kode pairing via nomor telepon.</p>
+          <label className="text-sm font-medium text-gray-700">Nomor Telepon (contoh: 6281234567890)</label>
+          <Input
+            placeholder="Contoh: 6281234567890"
+            value={phoneInput}
+            onChange={(e) => setPhoneInput(e.target.value)}
+          />
+          <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda '+', misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
         </div>
       </Modal>
     </div>

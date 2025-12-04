@@ -67,6 +67,9 @@ export const sessionAPI = {
   stop: (sessionId: string) => api.post(`/api/sessions/${sessionId}/stop`),
   
   delete: (sessionId: string) => api.delete(`/api/sessions/${sessionId}`),
+
+  requestPairingCode: (sessionId: string, phoneNumber: string) =>
+    api.post(`/api/sessions/${sessionId}/request-code`, { phoneNumber }),
 };
 
 // Contact APIs
