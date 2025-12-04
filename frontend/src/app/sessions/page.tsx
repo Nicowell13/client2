@@ -35,6 +35,7 @@ export default function SessionsPage() {
   const [qrWaitTimer, setQrWaitTimer] = useState<NodeJS.Timeout | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [statusPollTimer, setStatusPollTimer] = useState<NodeJS.Timeout | null>(null);
+  const [showPairingUI, setShowPairingUI] = useState(false);
   // WAHA free supports only 'default' session
   const [newSessionName] = useState('default');
   const [isCreating, setIsCreating] = useState(false);
@@ -137,8 +138,8 @@ export default function SessionsPage() {
     const timer = setTimeout(() => {
       const hasQr = !!(selectedSession?.qrCode || session.qrCode);
       if (!hasQr) {
-        // Expose pairing input within QR modal (no separate modal)
-        // pairingCode is initially null; user can request code
+        // Switch UI to pairing-only if QR didn't appear in 5s
+        setShowPairingUI(true);
       }
     }, 5000);
     setQrWaitTimer(timer);
@@ -198,9 +199,8 @@ export default function SessionsPage() {
       const code = resp?.data?.data?.code || resp?.data?.code;
       if (code) {
         setPairingCode(code);
-        toast.success(`Kode pairing: ${code}`);
       } else {
-        toast.success('Permintaan kode pairing berhasil dikirim.');
+        // no toast; client will read code in modal or receive SMS
       }
       // Do not auto-close; wait until connected
     } catch (error: any) {
@@ -387,11 +387,11 @@ export default function SessionsPage() {
       <Modal
         isOpen={showQRModal}
         onClose={() => setShowQRModal(false)}
-        title="Scan QR Code atau Minta Pairing Code"
+        title={showPairingUI ? 'Pairing Code' : 'Scan QR Code atau Minta Pairing Code'}
         size="md"
       >
         <div className="text-center">
-          {selectedSession?.qrCode ? (
+          {!showPairingUI && selectedSession?.qrCode ? (
             <>
               <div className="bg-white p-6 rounded-2xl inline-block border-4 border-blue-600">
                 <QRCode value={selectedSession.qrCode} size={256} />
@@ -406,29 +406,34 @@ export default function SessionsPage() {
                 </ol>
               </div>
             </>
-          ) : (
+          ) : !showPairingUI ? (
             <div className="py-12">
               <Loader className="w-12 h-12 animate-spin text-blue-600 mx-auto" />
               <p className="mt-4 text-gray-600">Loading QR Code...</p>
             </div>
-          )}
-          <div className="mt-8 text-left max-w-md mx-auto space-y-3">
-            <p className="text-sm text-gray-700">Jika QR gagal muncul atau Anda ingin pairing via kode:</p>
-            <label className="text-sm font-medium text-gray-700">Nomor Telepon (contoh: 6281234567890)</label>
-            <Input
-              placeholder="Contoh: 6281234567890"
-              value={phoneInput}
-              onChange={(e) => setPhoneInput(e.target.value)}
-            />
-            <div className="flex items-center gap-2">
-              <Button onClick={handleRequestPairingCode} isLoading={requestingCode}>Minta Kode Pairing</Button>
+          ) : null}
+          {showPairingUI && (
+            <div className="mt-2 text-left max-w-md mx-auto space-y-4">
+              <p className="text-sm text-gray-700">QR gagal muncul. Silakan lakukan pairing menggunakan kode.</p>
+              <label className="text-sm font-medium text-gray-700">Nomor Telepon (contoh: 6281234567890)</label>
+              <Input
+                placeholder="Contoh: 6281234567890"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+              />
+              <div className="flex items-center gap-2">
+                <Button onClick={handleRequestPairingCode} isLoading={requestingCode}>Minta Kode Pairing</Button>
+              </div>
               {pairingCode && (
-                <Badge variant="success">Kode: {pairingCode}</Badge>
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-gray-700 mb-2">Kode Pairing Anda:</p>
+                  <p className="text-2xl font-bold tracking-widest text-blue-700">{pairingCode}</p>
+                </div>
               )}
+              <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda '+', misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
+              <p className="text-xs text-gray-500">Dialog akan tetap terbuka sampai status terhubung.</p>
             </div>
-            <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda '+', misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
-            <p className="text-xs text-gray-500">Dialog ini akan tetap terbuka sampai status terhubung.</p>
-          </div>
+          )}
         </div>
       </Modal>
     </div>
