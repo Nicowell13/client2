@@ -79,14 +79,29 @@ router.post('/', async (req: Request, res: Response) => {
 // Get all sessions
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const sessions = await prisma.session.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+    const sessions = await prisma.session.findMany({ orderBy: { createdAt: 'desc' } });
 
-    res.json({
-      success: true,
-      data: sessions,
-    });
+    // Refresh statuses from WAHA for each session to avoid stale "offline" in UI
+    const refreshed = await Promise.all(
+      sessions.map(async (s) => {
+        try {
+          const status = await wahaService.getSessionStatus(s.sessionId);
+          const updated = await prisma.session.update({
+            where: { id: s.id },
+            data: {
+              status: status.status || s.status,
+              phoneNumber: status.me?.id || s.phoneNumber,
+            },
+          });
+          return updated;
+        } catch (err) {
+          // If WAHA unreachable, return original row
+          return s;
+        }
+      })
+    );
+
+    res.json({ success: true, data: refreshed });
   } catch (error: any) {
     res.status(500).json({
       success: false,
