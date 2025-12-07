@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Upload, Plus, Trash2 } from 'lucide-react';
-import api from '@/lib/api';
+import { contactAPI } from '@/lib/api-client';
 import toast from 'react-hot-toast';
 import { useDropzone } from 'react-dropzone';
 
@@ -16,6 +17,7 @@ interface Contact {
 }
 
 export default function ContactsPage() {
+  const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -23,15 +25,21 @@ export default function ContactsPage() {
   const [newContact, setNewContact] = useState({ name: '', phoneNumber: '', email: '' });
 
   useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/login');
+      return;
+    }
     fetchContacts();
   }, []);
 
   const fetchContacts = async () => {
     try {
-      const { data } = await api.get('/api/contacts');
-      setContacts(data.data);
-    } catch (error) {
-      toast.error('Failed to load contacts');
+      const resp = await contactAPI.getAll();
+      const data = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+      setContacts(data);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to load contacts');
     } finally {
       setLoading(false);
     }
@@ -46,10 +54,8 @@ export default function ContactsPage() {
 
     setUploading(true);
     try {
-      const { data } = await api.post('/api/contacts/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      toast.success(data.message);
+      const { data } = await contactAPI.uploadCSV(file);
+      toast.success(data?.message || 'Contacts uploaded');
       fetchContacts();
     } catch (error) {
       toast.error('Failed to upload contacts');
@@ -67,7 +73,7 @@ export default function ContactsPage() {
   const addContact = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post('/api/contacts', newContact);
+      await contactAPI.create(newContact);
       toast.success('Contact added successfully');
       setNewContact({ name: '', phoneNumber: '', email: '' });
       setShowAddForm(false);
@@ -80,7 +86,7 @@ export default function ContactsPage() {
   const deleteContact = async (id: string) => {
     if (!confirm('Are you sure you want to delete this contact?')) return;
     try {
-      await api.delete(`/api/contacts/${id}`);
+      await contactAPI.delete(id);
       toast.success('Contact deleted');
       fetchContacts();
     } catch (error) {

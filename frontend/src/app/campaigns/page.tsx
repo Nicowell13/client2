@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Plus } from 'lucide-react';
-import api from '@/lib/api';
+import { campaignAPI, sessionAPI } from '@/lib/api-client';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
 interface Campaign {
@@ -27,6 +28,7 @@ interface Session {
 }
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,16 +45,22 @@ export default function CampaignsPage() {
   });
 
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) {
+      router.push('/login');
+      return;
+    }
     fetchCampaigns();
     fetchSessions();
   }, []);
 
   const fetchCampaigns = async () => {
     try {
-      const { data } = await api.get('/api/campaigns');
-      setCampaigns(data.data);
-    } catch (error) {
-      toast.error('Failed to load campaigns');
+      const resp = await campaignAPI.getAll();
+      const list = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+      setCampaigns(list);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to load campaigns');
     } finally {
       setLoading(false);
     }
@@ -60,8 +68,9 @@ export default function CampaignsPage() {
 
   const fetchSessions = async () => {
     try {
-      const { data } = await api.get('/api/sessions');
-      setSessions(data.data);
+      const resp = await sessionAPI.getAll();
+      const list = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+      setSessions(list);
     } catch (error) {
       console.error('Failed to load sessions');
     }
@@ -79,7 +88,7 @@ export default function CampaignsPage() {
     }
 
     try {
-      await api.post('/api/campaigns', {
+      await campaignAPI.create({
         name: newCampaign.name,
         message: newCampaign.message,
         imageUrl: newCampaign.imageUrl || null,
@@ -107,8 +116,8 @@ export default function CampaignsPage() {
   const sendCampaign = async (campaignId: string) => {
     if (!confirm('Send this campaign to all contacts?')) return;
     try {
-      const { data } = await api.post(`/api/campaigns/${campaignId}/send`, {});
-      toast.success(data.message);
+      const { data } = await campaignAPI.send(campaignId, []);
+      toast.success(data?.message || 'Campaign sent');
       fetchCampaigns();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to send campaign');
@@ -118,7 +127,7 @@ export default function CampaignsPage() {
   const deleteCampaign = async (campaignId: string) => {
     if (!confirm('Are you sure you want to delete this campaign?')) return;
     try {
-      await api.delete(`/api/campaigns/${campaignId}`);
+      await campaignAPI.delete(campaignId);
       toast.success('Campaign deleted');
       fetchCampaigns();
     } catch (error) {
