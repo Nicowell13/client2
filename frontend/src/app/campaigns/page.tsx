@@ -203,6 +203,137 @@ export default function CampaignsPage() {
           </button>
         </div>
 
+        {/* CREATE FORM */}
+        {showCreateForm && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">Create New Campaign</h2>
+            <form onSubmit={createCampaign} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Campaign Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newCampaign.name}
+                  onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Message
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  value={newCampaign.message}
+                  onChange={(e) => setNewCampaign({ ...newCampaign, message: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Image URL (optional)
+                </label>
+                <input
+                  type="url"
+                  value={newCampaign.imageUrl}
+                  onChange={(e) => setNewCampaign({ ...newCampaign, imageUrl: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Session
+                </label>
+                <select
+                  required
+                  value={newCampaign.sessionId}
+                  onChange={(e) => setNewCampaign({ ...newCampaign, sessionId: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">Select a session</option>
+                  {sessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Button 1 Label
+                  </label>
+                  <input
+                    type="text"
+                    value={newCampaign.button1Label}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, button1Label: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Button 1 URL
+                  </label>
+                  <input
+                    type="url"
+                    value={newCampaign.button1Url}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, button1Url: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Button 2 Label
+                  </label>
+                  <input
+                    type="text"
+                    value={newCampaign.button2Label}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, button2Label: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Button 2 URL
+                  </label>
+                  <input
+                    type="url"
+                    value={newCampaign.button2Url}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, button2Url: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
+                >
+                  Create Campaign
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* LIST / UI BELOW — SAME UI, NO CHANGES */}
         {loading ? (
           <div className="text-center py-12">
