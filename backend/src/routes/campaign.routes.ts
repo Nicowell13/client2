@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import wahaService from '../services/waha.service';
 import campaignQueue from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
 
@@ -156,6 +157,22 @@ router.post('/:id/send', async (req: Request, res: Response) => {
         success: false,
         message: 'Campaign not found',
       });
+    }
+
+    // Refresh session status from WAHA to avoid stale DB value
+    try {
+      const wahaStatus = await wahaService.getSessionStatus(campaign.session.sessionId);
+      await prisma.session.update({
+        where: { id: campaign.session.id },
+        data: {
+          status: wahaStatus.status,
+          phoneNumber: wahaStatus.me?.id || campaign.session.phoneNumber,
+        },
+      });
+      // Reflect the fresh status in our local object
+      campaign.session.status = wahaStatus.status;
+    } catch (e) {
+      // If WAHA call fails, fall back to existing status
     }
 
     // Check session status
