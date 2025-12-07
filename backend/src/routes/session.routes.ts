@@ -1,3 +1,4 @@
+// backend/src/routes/session.routes.ts
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import wahaService from '../services/waha.service';
@@ -13,39 +14,35 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { name = 'default' } = req.body;
 
-    console.log(`[SESSION] Creating session: ${name}`);
+    console.log('[SESSION] Creating session:', name);
 
-    // If session already exists in DB, return it directly
     const existing = await prisma.session.findFirst({ where: { sessionId: name } });
     if (existing) {
       return res.json({ success: true, data: existing });
     }
 
-    // Start session with WAHA
     try {
       const wahaSession = await wahaService.startSession(name);
-      console.log(`[SESSION] WAHA response:`, wahaSession);
+      console.log('[SESSION] WAHA response:', wahaSession);
 
-      // Save to database
       const session = await prisma.session.create({
         data: {
           name,
-          sessionId: wahaSession.name || name,
+          sessionId: (wahaSession && (wahaSession.name || wahaSession.session || wahaSession.sessionId)) || name,
           status: 'starting',
           isDefault: true,
         },
       });
 
-      console.log(`[SESSION] Session created in DB:`, session.id);
+      console.log('[SESSION] Session created in DB:', session.id);
 
-      res.json({
+      return res.json({
         success: true,
         data: session,
       });
     } catch (wahaError: any) {
-      console.error(`[SESSION] WAHA error:`, wahaError.message);
-      
-      // Try to create session in DB even if WAHA fails (for retry later)
+      console.error('[SESSION] WAHA error:', wahaError?.message || wahaError);
+
       let session;
       try {
         session = await prisma.session.create({
@@ -57,31 +54,31 @@ router.post('/', async (req: Request, res: Response) => {
           },
         });
       } catch (dbErr: any) {
-        // If already exists, return existing row
         session = await prisma.session.findFirst({ where: { sessionId: name } });
       }
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
-        message: `Failed to start WhatsApp session: ${wahaError.message}. Session saved for manual retry.`,
+        message: `Failed to start WhatsApp session: ${
+          wahaError?.message || 'Unknown error'
+        }. Session saved for manual retry.`,
         data: session,
       });
     }
   } catch (error: any) {
-    console.error(`[SESSION] Unexpected error:`, error);
-    res.status(500).json({
+    console.error('[SESSION] Unexpected error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message || 'Failed to create session',
+      message: error?.message || 'Failed to create session',
     });
   }
 });
 
 // Get all sessions
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
   try {
     const sessions = await prisma.session.findMany({ orderBy: { createdAt: 'desc' } });
 
-    // Refresh statuses from WAHA for each session to avoid stale "offline" in UI
     const refreshed = await Promise.all(
       sessions.map(async (s) => {
         try {
@@ -89,23 +86,23 @@ router.get('/', async (req: Request, res: Response) => {
           const updated = await prisma.session.update({
             where: { id: s.id },
             data: {
-              status: status.status || s.status,
-              phoneNumber: status.me?.id || s.phoneNumber,
+              status: status?.status || s.status,
+              phoneNumber: status?.me?.id || s.phoneNumber,
             },
           });
           return updated;
-        } catch (err) {
-          // If WAHA unreachable, return original row
+        } catch (_err) {
           return s;
         }
       })
     );
 
-    res.json({ success: true, data: refreshed });
+    return res.json({ success: true, data: refreshed });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('[SESSION] Failed to list sessions:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error?.message || 'Failed to get sessions',
     });
   }
 });
@@ -126,32 +123,31 @@ router.get('/:id', async (req: Request, res: Response) => {
       });
     }
 
-    // Get status from WAHA
     try {
       const wahaStatus = await wahaService.getSessionStatus(session.sessionId);
-      
-      // Update status in database
+
       await prisma.session.update({
         where: { id },
         data: {
-          status: wahaStatus.status,
-          phoneNumber: wahaStatus.me?.id || session.phoneNumber,
+          status: wahaStatus?.status || session.status,
+          phoneNumber: wahaStatus?.me?.id || session.phoneNumber,
         },
       });
 
-      session.status = wahaStatus.status;
-    } catch (error) {
-      console.error('Failed to get WAHA status:', error);
+      session.status = wahaStatus?.status || session.status;
+    } catch (err: any) {
+      console.error('[SESSION] Failed to get WAHA status:', err?.message || err);
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: session,
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('[SESSION] Failed to get session:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error?.message || 'Failed to get session',
     });
   }
 });
@@ -172,54 +168,65 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
       });
     }
 
-    // Try WAHA QR endpoint first, supporting multiple formats
+    // 1) Coba QR endpoint
     try {
       const qrResp = await wahaService.getQRCode(session.sessionId);
       let dataUrl: string | null = null;
+
       if (qrResp.format === 'json') {
-        const base64 = qrResp.data?.base64 || qrResp.data?.qr || qrResp.data?.image;
+        const base64 =
+          qrResp.data?.base64 || qrResp.data?.qr || qrResp.data?.image;
         if (base64) {
-          dataUrl = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+          dataUrl = base64.startsWith('data:')
+            ? base64
+            : `data:image/png;base64,${base64}`;
         }
       } else if (qrResp.format === 'png') {
         dataUrl = qrResp.data;
       } else if (qrResp.format === 'raw') {
-        // raw text value: render as QR via frontend component
-        dataUrl = qrResp.data; // not a data URL, but store raw and let UI handle
+        // raw text, dikirim apa adanya; frontend yang render
+        dataUrl = qrResp.data;
       }
 
       if (dataUrl) {
         await prisma.session.update({ where: { id }, data: { qrCode: dataUrl } });
         return res.json({ success: true, data: { qr: dataUrl } });
       }
-      console.warn('[SESSION][QR] QR endpoint returned no image/base64, falling back to screenshot');
-    } catch (qrErr: any) {
-      console.warn('[SESSION][QR] QR endpoint failed, trying screenshot...', qrErr.message);
+
+      console.warn('[SESSION][QR] WAHA QR empty, fallback to screenshot');
+    } catch (err: any) {
+      console.warn('[SESSION][QR] WAHA QR failed → screenshot fallback:', err?.message || err);
     }
 
-    // Fallback: use WAHA screenshot via official endpoint
+    // 2) Screenshot fallback
     const shot = await wahaService.getSessionScreenshot(session.sessionId);
     let dataUrl: string | null = null;
 
-    if (shot?.format === 'jpeg') {
-      dataUrl = shot.data; // already a data URL
-    } else if (shot?.format === 'json') {
-      const base64 = shot.data?.base64 || shot.data?.file?.base64 || null;
+    if (shot.format === 'jpeg') {
+      dataUrl = shot.data; // sudah data URL
+    } else if (shot.format === 'json') {
+      const base64 =
+        shot.data?.base64 || shot.data?.file?.base64 || null;
       if (base64) {
-        dataUrl = base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
+        dataUrl = base64.startsWith('data:')
+          ? base64
+          : `data:image/jpeg;base64,${base64}`;
       }
     }
 
     if (!dataUrl) {
-      return res.status(500).json({ success: false, message: 'Screenshot did not contain image' });
+      return res
+        .status(500)
+        .json({ success: false, message: 'Screenshot did not contain image' });
     }
 
     await prisma.session.update({ where: { id }, data: { qrCode: dataUrl } });
-    res.json({ success: true, data: { qr: dataUrl } });
+    return res.json({ success: true, data: { qr: dataUrl } });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('[SESSION][QR] Unexpected error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error?.message || 'Failed to get QR code',
     });
   }
 });
@@ -249,14 +256,15 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
       },
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Session stopped successfully',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('[SESSION] Failed to stop session:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error?.message || 'Failed to stop session',
     });
   }
 });
@@ -270,39 +278,50 @@ router.delete('/:id', async (req: Request, res: Response) => {
       where: { id },
     });
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Session deleted successfully',
     });
   } catch (error: any) {
-    res.status(500).json({
+    console.error('[SESSION] Failed to delete session:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error?.message || 'Failed to delete session',
     });
   }
 });
 
-// Request pairing code (fallback when QR is unavailable)
+// Request pairing code
 router.post('/:id/request-code', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { phoneNumber } = req.body;
 
     if (!phoneNumber) {
-      return res.status(400).json({ success: false, message: 'phoneNumber is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: 'phoneNumber is required' });
     }
 
     const session = await prisma.session.findUnique({ where: { id } });
     if (!session) {
-      return res.status(404).json({ success: false, message: 'Session not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: 'Session not found' });
     }
 
-    const resp = await wahaService.requestPairingCode(session.sessionId, phoneNumber);
-    // WAHA returns code or sends SMS; just proxy the payload
+    const resp = await wahaService.requestPairingCode(
+      session.sessionId,
+      phoneNumber
+    );
+
     return res.json({ success: true, data: resp });
   } catch (error: any) {
-    console.error('[SESSION][PAIR] Error:', error.message);
-    return res.status(500).json({ success: false, message: error.message || 'Failed to request pairing code' });
+    console.error('[SESSION][PAIR] Error:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to request pairing code',
+    });
   }
 });
 
