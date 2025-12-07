@@ -33,6 +33,7 @@ export default function CampaignsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [refreshingSessions, setRefreshingSessions] = useState(false);
   const [newCampaign, setNewCampaign] = useState({
     name: '',
     message: '',
@@ -68,11 +69,15 @@ export default function CampaignsPage() {
 
   const fetchSessions = async () => {
     try {
+      setRefreshingSessions(true);
       const resp = await sessionAPI.getAll();
       const list = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+      console.log('[CAMPAIGNS] Fetched sessions:', list);
       setSessions(list);
     } catch (error) {
-      console.error('Failed to load sessions');
+      console.error('Failed to load sessions:', error);
+    } finally {
+      setRefreshingSessions(false);
     }
   };
 
@@ -115,11 +120,18 @@ export default function CampaignsPage() {
 
   const sendCampaign = async (campaignId: string) => {
     if (!confirm('Send this campaign to all contacts?')) return;
+    
+    // Refresh sessions to ensure latest status before sending
+    await fetchSessions();
+    
     try {
+      console.log('[CAMPAIGNS] Sending campaign:', campaignId);
       const { data } = await campaignAPI.send(campaignId, []);
+      console.log('[CAMPAIGNS] Send response:', data);
       toast.success(data?.message || 'Campaign sent');
       fetchCampaigns();
     } catch (error: any) {
+      console.error('[CAMPAIGNS] Send error:', error);
       toast.error(error.response?.data?.message || 'Failed to send campaign');
     }
   };
@@ -161,11 +173,18 @@ export default function CampaignsPage() {
             <h1 className="text-3xl font-bold text-gray-900">Campaigns</h1>
           </div>
           <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
+            onClick={async () => {
+              if (!showCreateForm) {
+                // Refresh sessions to show latest status when opening form
+                await fetchSessions();
+              }
+              setShowCreateForm(!showCreateForm);
+            }}
             className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+            disabled={refreshingSessions}
           >
             <Plus className="w-5 h-5" />
-            Create Campaign
+            {refreshingSessions ? 'Loading...' : 'Create Campaign'}
           </button>
         </div>
 
