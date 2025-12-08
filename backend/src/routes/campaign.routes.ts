@@ -16,37 +16,27 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { name, messages, imageUrl, sessionId, buttons } = req.body;
 
-    if (!name || !sessionId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name & sessionId are required',
-      });
-    }
+    if (!name || !sessionId)
+      return res.status(400).json({ success: false, message: 'Name & sessionId are required' });
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'messages[] must contain at least 1 message',
-      });
-    }
+    if (!Array.isArray(messages) || messages.length === 0)
+      return res.status(400).json({ success: false, message: 'messages[] must contain ≥1 message' });
 
     const session = await prisma.session.findUnique({ where: { id: sessionId } });
-    if (!session) {
+    if (!session)
       return res.status(404).json({ success: false, message: 'Session not found' });
-    }
 
-    // Create campaign
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        messages,
-        message: messages[0], // fallback for compatibility
+        messages,              // ARRAY field
+        message: messages[0],  // fallback for compatibility
         imageUrl: imageUrl || null,
         sessionId,
       },
     });
 
-    // Add optional button(s)
+    // Insert up to 2 buttons
     if (Array.isArray(buttons) && buttons.length > 0) {
       await prisma.button.createMany({
         data: buttons.slice(0, 2).map((btn: any, i: number) => ({
@@ -64,6 +54,7 @@ router.post('/', async (req: Request, res: Response) => {
     });
 
     return res.json({ success: true, data: result });
+
   } catch (err: any) {
     console.error('[CAMPAIGN][CREATE]', err);
     return res.status(500).json({ success: false, message: err.message });
@@ -79,7 +70,7 @@ router.get('/', async (_req: Request, res: Response) => {
       include: {
         buttons: true,
         session: true,
-        _count: { select: { messages: true } }, // count logs
+        _count: { select: { messagesList: true } }, // FIXED — message logs count
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -92,7 +83,7 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 /* ===========================================================
-    SEND CAMPAIGN — RANDOM VARIANT MESSAGE
+    SEND CAMPAIGN — RANDOM MESSAGE VARIANT
 =========================================================== */
 router.post('/:id/send', async (req: Request, res: Response) => {
   try {
@@ -103,20 +94,15 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       include: { buttons: true, session: true },
     });
 
-    if (!campaign) {
+    if (!campaign)
       return res.status(404).json({ success: false, message: 'Campaign not found' });
-    }
 
-    if (!Array.isArray(campaign.messages) || campaign.messages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Campaign has no messages[] variants',
-      });
-    }
+    if (!Array.isArray(campaign.messages) || campaign.messages.length === 0)
+      return res.status(400).json({ success: false, message: 'Campaign has no messages[]' });
 
     const session = campaign.session;
 
-    // Refresh WAHA session status
+    // Refresh WAHA status
     try {
       const status = await wahaService.getSessionStatus(session.sessionId);
       await prisma.session.update({
@@ -128,23 +114,21 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
       session.status = status?.status || session.status;
     } catch {
-      console.warn('[SEND] WAHA unreachable – using cached status');
+      console.warn('[SEND] WAHA unreachable — using cached status');
     }
 
-    if (!['working', 'ready', 'authenticated'].includes(session.status.toLowerCase())) {
+    if (!['working', 'ready', 'authenticated'].includes(session.status.toLowerCase()))
       return res.status(400).json({
         success: false,
-        message: `Session '${session.sessionId}' is not active`,
+        message: `Session '${session.sessionId}' is not active (status: ${session.status})`,
       });
-    }
 
     // Load contacts
     const contacts = await prisma.contact.findMany();
-    if (contacts.length === 0) {
+    if (contacts.length === 0)
       return res.status(400).json({ success: false, message: 'No contacts found' });
-    }
 
-    // Create logs
+    // Log message records
     await prisma.message.createMany({
       data: contacts.map((c) => ({
         campaignId: campaign.id,
@@ -158,28 +142,21 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       data: { status: 'sending', totalContacts: contacts.length },
     });
 
-    /* ===========================================================
-        Batch into chunks of 500
-    ============================================================ */
+    // Batch into groups of 500
     const BATCH_SIZE = 500;
     const batches = [];
     for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
       batches.push(contacts.slice(i, i + BATCH_SIZE));
     }
 
-    const btns = campaign.buttons.map((b) => ({
-      label: b.label,
-      url: b.url,
-    }));
+    const btns = campaign.buttons.map((b) => ({ label: b.label, url: b.url }));
 
-    // Random message picker
     const pickRandom = (arr: string[]) =>
       arr[Math.floor(Math.random() * arr.length)];
 
-    // Queue jobs
+    // Push queue jobs
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
-
       for (let i = 0; i < batch.length; i++) {
         const contact = batch[i];
 
@@ -187,7 +164,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           campaignId: campaign.id,
           contactId: contact.id,
           phoneNumber: contact.phoneNumber,
-          message: pickRandom(campaign.messages), // RANDOM variant
+          messages: campaign.messages,       // ALL VARIANTS
           imageUrl: campaign.imageUrl,
           buttons: btns,
           sessionName: session.sessionId,
@@ -213,10 +190,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     await prisma.campaign.delete({ where: { id: req.params.id } });
-    return res.json({
-      success: true,
-      message: 'Campaign deleted successfully',
-    });
+    return res.json({ success: true, message: 'Campaign deleted successfully' });
   } catch (err: any) {
     console.error('[CAMPAIGN][DELETE]', err);
     return res.status(500).json({ success: false, message: err.message });
