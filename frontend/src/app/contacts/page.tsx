@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import DashboardLayout from '@/components/DashboardLayout';
 import Link from 'next/link';
 import { ArrowLeft, Upload, Plus, Trash2 } from 'lucide-react';
 import { contactAPI } from '@/lib/api-client';
@@ -95,15 +96,9 @@ export default function ContactsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
+    <DashboardLayout title="Contacts" description="Manage your contact list">
+      <div>
         <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-gray-600 hover:text-gray-900">
-              <ArrowLeft className="w-6 h-6" />
-            </Link>
-            <h1 className="text-3xl font-bold text-gray-900">Contacts</h1>
-          </div>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
             className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
@@ -241,6 +236,6 @@ export default function ContactsPage() {
           )}
         </div>
       </div>
-    </div>
+    </DashboardLayout>
   );
 }

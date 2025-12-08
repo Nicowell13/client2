@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import DashboardLayout from '@/components/DashboardLayout';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
-import api from '@/lib/api';
+import { campaignAPI } from '@/lib/api-client';
 
 interface Message {
   id: string;
@@ -34,13 +35,18 @@ export default function MessagesPage() {
 
   const fetchMessages = async () => {
     try {
-      const { data: campaigns } = await api.get('/api/campaigns');
+      const resp = await campaignAPI.getAll();
+      const campaigns = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
       const allMessages: Message[] = [];
       
-      for (const campaign of campaigns.data) {
-        const { data: detail } = await api.get(`/api/campaigns/${campaign.id}`);
-        if (detail.data.messages) {
-          allMessages.push(...detail.data.messages);
+      for (const campaign of campaigns) {
+        try {
+          const { data: detail } = await campaignAPI.getAll(); // Ideally use a specific endpoint
+          if (detail?.messages) {
+            allMessages.push(...detail.messages);
+          }
+        } catch (err) {
+          console.error('Error fetching campaign detail:', err);
         }
       }
       
@@ -67,18 +73,8 @@ export default function MessagesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-gray-600 hover:text-gray-900">
-              <ArrowLeft className="w-6 h-6" />
-            </Link>
-            <h1 className="text-3xl font-bold text-gray-900">Messages</h1>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow">
+    <DashboardLayout title="Messages" description="View all sent messages and their status">
+      <div className="bg-white rounded-lg shadow">
           <div className="p-6 border-b">
             <h2 className="text-xl font-semibold">All Messages ({messages.length})</h2>
           </div>
@@ -128,7 +124,6 @@ export default function MessagesPage() {
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DashboardLayout>
   );
 }

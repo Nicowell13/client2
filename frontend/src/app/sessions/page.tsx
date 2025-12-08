@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import DashboardLayout from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -268,24 +269,16 @@ export default function SessionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">WhatsApp Sessions</h1>
-              <p className="text-gray-600 mt-1">Manage your WhatsApp connections</p>
-            </div>
-            <Button onClick={() => setShowCreateModal(true)} size="lg">
-              <Plus className="w-5 h-5 mr-2" />
-              New Session
-            </Button>
-          </div>
+    <DashboardLayout title="WhatsApp Sessions" description="Manage your WhatsApp connections">
+      <div>
+        {/* Header Button */}
+        <div className="flex items-center justify-between mb-8">
+          <Button onClick={() => setShowCreateModal(true)} size="lg">
+            <Plus className="w-5 h-5 mr-2" />
+            New Session
+          </Button>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Sessions Grid */}
         {sessions.length === 0 ? (
           <Card variant="bordered" className="text-center py-16">
@@ -359,7 +352,7 @@ export default function SessionsPage() {
             ))}
           </div>
         )}
-      </main>
+      </div>
 
       {/* Create Session Modal */}
       <Modal
@@ -436,6 +429,6 @@ export default function SessionsPage() {
           )}
         </div>
       </Modal>
-    </div>
+    </DashboardLayout>
   );
 }

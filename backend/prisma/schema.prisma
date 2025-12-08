@@ -57,25 +57,27 @@ model Contact {
 }
 
 model Campaign {
-  id          String    @id @default(cuid())
-  name        String
-  message     String    @db.Text
-  imageUrl    String?
-  status      String    @default("draft") // draft, scheduled, sending, sent, failed
-  sessionId   String
-  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  
-  scheduledAt DateTime?
-  sentAt      DateTime?
-  totalContacts Int     @default(0)
-  sentCount   Int       @default(0)
-  failedCount Int       @default(0)
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  buttons     Button[]
-  messages    Message[]
+  id            String    @id @default(cuid())
+  name          String
+  message       String    @db.Text    // optional: bisa hapus nanti kalau pakai messages[]
+  messages      String[]  @default([])  // << NEW: menyimpan banyak variasi pesan
+  imageUrl      String?
+  status        String    @default("draft")
+  sessionId     String
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+  totalContacts Int       @default(0)
+  sentCount     Int       @default(0)
+  failedCount   Int       @default(0)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  buttons       Button[]
+  messagesList  Message[] @relation("CampaignMessages") // rename relation to avoid conflict
+                                                // (optional—hanya jika error)
   
   @@map("campaigns")
 }

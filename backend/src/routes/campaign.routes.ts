@@ -9,8 +9,11 @@ import { authMiddleware } from '../middleware/auth';
 const router = Router();
 router.use(authMiddleware);
 
+// Helper type
+type CampaignWithRelations = Awaited<ReturnType<typeof prisma.campaign.findUnique>>;
+
 /* ===========================================================
-   CREATE CAMPAIGN
+    CREATE CAMPAIGN
 =========================================================== */
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -19,7 +22,7 @@ router.post('/', async (req: Request, res: Response) => {
     if (!name || !message || !sessionId) {
       return res.status(400).json({
         success: false,
-        message: 'Name, message and sessionId are required',
+        message: 'Name, message & sessionId are required',
       });
     }
 
@@ -37,7 +40,7 @@ router.post('/', async (req: Request, res: Response) => {
       },
     });
 
-    // Add buttons (max 2)
+    // Add up to 2 buttons
     if (Array.isArray(buttons) && buttons.length > 0) {
       await prisma.button.createMany({
         data: buttons.slice(0, 2).map((btn: any, i: number) => ({
@@ -55,14 +58,14 @@ router.post('/', async (req: Request, res: Response) => {
     });
 
     return res.json({ success: true, data: result });
-  } catch (error: any) {
-    console.error('[CAMPAIGN][CREATE]', error);
-    return res.status(500).json({ success: false, message: error.message });
+  } catch (err: any) {
+    console.error('[CAMPAIGN][CREATE]', err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /* ===========================================================
-   GET ALL CAMPAIGNS
+    GET ALL CAMPAIGNS
 =========================================================== */
 router.get('/', async (_req: Request, res: Response) => {
   try {
@@ -75,18 +78,15 @@ router.get('/', async (_req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    return res.json({
-      success: true,
-      data: campaigns,
-    });
-  } catch (error: any) {
-    console.error('[CAMPAIGN][LIST]', error);
-    return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true, data: campaigns });
+  } catch (err: any) {
+    console.error('[CAMPAIGN][LIST]', err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /* ===========================================================
-   SEND CAMPAIGN (WITH AUTO BATCH 500)
+    SEND CAMPAIGN (BATCHED 500)
 =========================================================== */
 router.post('/:id/send', async (req: Request, res: Response) => {
   try {
@@ -95,18 +95,23 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     const campaign = await prisma.campaign.findUnique({
       where: { id },
-      include: { buttons: true, session: true },
+      include: { buttons: true, session: true, messages: true },
     });
 
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
 
+    if (!Array.isArray(campaign.messages)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Campaign has no messages[]',
+      });
+    }
+
     const session = campaign.session;
 
-    /* ---------------------------
-       REFRESH SESSION STATUS
-    ---------------------------- */
+    /* ---------- REFRESH WAHA SESSION ---------- */
     try {
       const status = await wahaService.getSessionStatus(session.sessionId);
 
@@ -119,8 +124,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
 
       session.status = status?.status || session.status;
-    } catch (e) {
-      console.warn('[CAMPAIGN][STATUS] WAHA unreachable, using old status');
+    } catch {
+      console.warn('[SEND] WAHA unreachable → using cached status');
     }
 
     const normalized = (session.status || '').toLowerCase();
@@ -132,9 +137,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
     }
 
-    /* ---------------------------
-       GET CONTACTS
-    ---------------------------- */
+    /* ---------- LOAD CONTACTS ---------- */
     const where =
       contactIds && contactIds.length > 0
         ? { id: { in: contactIds } }
@@ -149,7 +152,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
     }
 
-    // Save message placeholder rows
+    // Prepare message database entries
     await prisma.message.createMany({
       data: contacts.map((c) => ({
         campaignId: campaign.id,
@@ -158,9 +161,6 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       })),
     });
 
-    /* ---------------------------
-       UPDATE CAMPAIGN STATUS
-    ---------------------------- */
     await prisma.campaign.update({
       where: { id },
       data: {
@@ -169,12 +169,11 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       },
     });
 
-    /* ===========================================================
-       >>>>>>>>>>>>> AUTO SPLIT INTO 500-SIZE BATCHES <<<<<<<<<<<<<
-    ============================================================ */
-
+    /* =====================================================
+        BATCH INTO GROUPS OF 500
+    ===================================================== */
     const BATCH_SIZE = 500;
-    const batches = [];
+    const batches: any[] = [];
 
     for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
       batches.push(contacts.slice(i, i + BATCH_SIZE));
@@ -185,8 +184,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       url: b.url,
     }));
 
-    for (let b = 0; b < batches.length; b++) {
-      const batch = batches[b];
+    // Create jobs per contact
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
 
       for (let i = 0; i < batch.length; i++) {
         const c = batch[i];
@@ -198,35 +198,29 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           message: campaign.message,
           imageUrl: campaign.imageUrl,
           buttons: btns,
-          sessionName: campaign.session.sessionId, // WAHA SESSION NAME
+          sessionName: campaign.session.sessionId,
           messageIndex: i,
-          batchIndex: b,
+          batchIndex,
         });
       }
     }
 
-    /* ---------------------------
-       RESPONSE
-    ---------------------------- */
     return res.json({
       success: true,
-      message: `Campaign queued successfully in ${batches.length} batches`,
+      message: `Campaign queued in ${batches.length} batches`,
       data: {
         totalContacts: contacts.length,
         totalBatches: batches.length,
       },
     });
-  } catch (error: any) {
-    console.error('[CAMPAIGN][SEND]', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to send campaign',
-    });
+  } catch (err: any) {
+    console.error('[CAMPAIGN][SEND]', err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /* ===========================================================
- UPDATE CAMPAIGN
+    UPDATE CAMPAIGN
 =========================================================== */
 router.put('/:id', async (req: Request, res: Response) => {
   try {
@@ -237,9 +231,11 @@ router.put('/:id', async (req: Request, res: Response) => {
       data: { name, message, imageUrl },
     });
 
-    // Replace buttons
+    // Replace all buttons
     if (buttons) {
-      await prisma.button.deleteMany({ where: { campaignId: req.params.id } });
+      await prisma.button.deleteMany({
+        where: { campaignId: req.params.id },
+      });
 
       await prisma.button.createMany({
         data: buttons.slice(0, 2).map((btn: any, i: number) => ({
@@ -257,26 +253,31 @@ router.put('/:id', async (req: Request, res: Response) => {
     });
 
     return res.json({ success: true, data: updated });
-  } catch (error: any) {
-    console.error('[CAMPAIGN][UPDATE]', error);
-    return res.status(500).json({ success: false, message: error.message });
+  } catch (err: any) {
+    console.error('[CAMPAIGN][UPDATE]', err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 /* ===========================================================
- DELETE CAMPAIGN
+    DELETE CAMPAIGN
 =========================================================== */
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    await prisma.campaign.delete({ where: { id: req.params.id } });
+    await prisma.campaign.delete({
+      where: { id: req.params.id },
+    });
 
     return res.json({
       success: true,
       message: 'Campaign deleted successfully',
     });
-  } catch (error: any) {
-    console.error('[CAMPAIGN][DELETE]', error);
-    return res.status(500).json({ success: false, message: error.message });
+  } catch (err: any) {
+    console.error('[CAMPAIGN][DELETE]', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 

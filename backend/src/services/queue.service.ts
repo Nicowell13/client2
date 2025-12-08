@@ -1,3 +1,5 @@
+// backend/src/services/queue.service.ts
+
 import Bull from 'bull';
 import prisma from '../lib/prisma';
 import wahaService from './waha.service';
@@ -23,7 +25,10 @@ interface CampaignJob {
   campaignId: string;
   contactId: string;
   phoneNumber: string;
-  message: string;
+
+  /** NEW: multiple variants from campaign */
+  messages: string[];
+
   imageUrl: string | null;
   buttons: Array<{ label: string; url: string }>;
   sessionName: string;
@@ -38,27 +43,28 @@ function random(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Delay per message
+// Delay per message (natural, human-like)
 function calcMessageDelay(index: number): number {
-  const perMessage = random(7000, 12000); // 7–12 sec natural delay
-  const extra = Math.floor(index / 5) * random(8000, 15000); // extra delay every 5 msgs
+  const perMessage = random(7000, 12000); // 7–12 sec
+  const extra = Math.floor(index / 5) * random(8000, 15000); // add more delay every 5 msgs
   return perMessage + extra;
 }
 
 // Delay per batch (max 500)
 function batchCooldown(batchIndex: number): number {
-  return batchIndex === 0 ? 0 : random(20000, 30000); // 20–30 sec cooldown
+  return batchIndex === 0 ? 0 : random(20000, 30000); // 20–30 sec rest
 }
 
 // ========================================================
-//  QUEUE PROCESSOR (5 concurrent workers)
+//  QUEUE PROCESSOR
 // ========================================================
 campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   const {
     campaignId,
     contactId,
     phoneNumber,
-    message,
+
+    messages, // <—— NEW ARRAY
     imageUrl,
     buttons,
     sessionName,
@@ -67,7 +73,15 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   } = job.data;
 
   try {
-    // Apply Batch Delay (only first message in each batch triggers cooldown)
+    /* ======================================================
+       SELECT RANDOM MESSAGE (ANTI-SPAM)
+    ====================================================== */
+    const messageToSend =
+      messages[Math.floor(Math.random() * messages.length)];
+
+    /* ======================================================
+       APPLY BATCH COOLDOWN
+    ====================================================== */
     if (messageIndex === 0) {
       const cooldown = batchCooldown(batchIndex);
       console.log(
@@ -76,23 +90,27 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       await new Promise((r) => setTimeout(r, cooldown));
     }
 
-    // Delay per message
+    /* ======================================================
+       PER-MESSAGE DELAY
+    ====================================================== */
     const delay = calcMessageDelay(messageIndex);
     console.log(
-      `⏳ Delaying message ${messageIndex + 1} in batch ${batchIndex} by ${delay}ms`
+      `⏳ Delay message ${messageIndex + 1} in batch ${batchIndex} by ${delay}ms`
     );
     await new Promise((r) => setTimeout(r, delay));
 
-    // Send WhatsApp message
+    /* ======================================================
+       SEND MESSAGE THROUGH WAHA
+    ====================================================== */
     const result = await wahaService.sendMessageWithButtons(
       sessionName,
       phoneNumber,
-      message,
+      messageToSend, // RANDOMIZED MESSAGE
       imageUrl,
       buttons
     );
 
-    // Update message status
+    // Update message -> sent
     await prisma.message.updateMany({
       where: { campaignId, contactId, status: 'pending' },
       data: {
@@ -102,7 +120,6 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       },
     });
 
-    // Increment sent count
     await prisma.campaign.update({
       where: { id: campaignId },
       data: { sentCount: { increment: 1 } },
@@ -112,7 +129,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   } catch (error: any) {
     console.error('❌ Message sending failed:', error?.message);
 
-    // Mark failed message
+    // Mark failed
     await prisma.message.updateMany({
       where: { campaignId, contactId, status: 'pending' },
       data: {
@@ -121,7 +138,6 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       },
     });
 
-    // Increment failed count
     await prisma.campaign.update({
       where: { id: campaignId },
       data: { failedCount: { increment: 1 } },
@@ -139,7 +155,6 @@ campaignQueue.on('completed', async (job, result) => {
 
   const { campaignId } = job.data;
 
-  // Check if campaign is finished
   const pending = await prisma.message.count({
     where: { campaignId, status: 'pending' },
   });
@@ -154,10 +169,10 @@ campaignQueue.on('completed', async (job, result) => {
 });
 
 campaignQueue.on('failed', async (job, err) => {
-  const campaignId = job.data.campaignId;
   console.error(`❌ Job ${job.id} failed:`, err.message);
 
-  // If all messages processed, update campaign
+  const campaignId = job.data.campaignId;
+
   const pending = await prisma.message.count({
     where: { campaignId, status: 'pending' },
   });
