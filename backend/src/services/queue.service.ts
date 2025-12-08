@@ -41,7 +41,7 @@ function random(min: number, max: number) {
 // Delay per message
 function calcMessageDelay(index: number): number {
   const perMessage = random(7000, 12000); // 7–12 sec natural delay
-  const extra = Math.floor(index / 50) * random(8000, 15000); // extra delay every 50 msgs
+  const extra = Math.floor(index / 5) * random(8000, 15000); // extra delay every 5 msgs
   return perMessage + extra;
 }
 
@@ -53,7 +53,7 @@ function batchCooldown(batchIndex: number): number {
 // ========================================================
 //  QUEUE PROCESSOR (5 concurrent workers)
 // ========================================================
-campaignQueue.process(5, async (job: Bull.Job<CampaignJob>) => {
+campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   const {
     campaignId,
     contactId,
