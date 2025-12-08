@@ -1,5 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
@@ -16,27 +16,27 @@ model User {
   email     String   @unique
   password  String
   name      String
-  role      String   @default("user") // user, admin
+  role      String   @default("user") 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@map("users")
 }
 
 model Session {
-  id          String    @id @default(cuid())
-  name        String    @default("default")
-  sessionId   String    @unique
-  status      String    @default("stopped") // stopped, starting, working, failed
+  id          String     @id @default(cuid())
+  name        String     @default("default")
+  sessionId   String     @unique
+  status      String     @default("stopped") 
   qrCode      String?
   phoneNumber String?
-  isDefault   Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  isDefault   Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
   campaigns   Campaign[]
-  
+
   @@map("sessions")
 }
 
@@ -49,9 +49,9 @@ model Contact {
   metadata    Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
+
   messages    Message[]
-  
+
   @@unique([phoneNumber])
   @@map("contacts")
 }
@@ -59,58 +59,60 @@ model Contact {
 model Campaign {
   id            String    @id @default(cuid())
   name          String
-  message       String    @db.Text    // optional: bisa hapus nanti kalau pakai messages[]
-  messages      String[]  @default([])  // << NEW: menyimpan banyak variasi pesan
+
+  // MULTI MESSAGE SYSTEM
+  message       String     @db.Text     // legacy support (optional)
+  variants      String[]   @default([]) // <— New: many variations for random sending
+
   imageUrl      String?
-  status        String    @default("draft")
+  status        String     @default("draft")
   sessionId     String
-  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session       Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   scheduledAt   DateTime?
   sentAt        DateTime?
-  totalContacts Int       @default(0)
-  sentCount     Int       @default(0)
-  failedCount   Int       @default(0)
+  totalContacts Int        @default(0)
+  sentCount     Int        @default(0)
+  failedCount   Int        @default(0)
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   buttons       Button[]
-  messagesList  Message[] @relation("CampaignMessages") // rename relation to avoid conflict
-                                                // (optional—hanya jika error)
-  
+  messages      Message[]   // <— Relation to Message (no conflict)
+
   @@map("campaigns")
 }
 
 model Button {
-  id          String    @id @default(cuid())
+  id          String     @id @default(cuid())
   campaignId  String
-  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  
+  campaign    Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
   label       String
   url         String
-  order       Int       @default(1) // 1 or 2
-  
-  createdAt   DateTime  @default(now())
-  
+  order       Int        @default(1)
+
+  createdAt   DateTime   @default(now())
+
   @@map("buttons")
 }
 
 model Message {
-  id          String    @id @default(cuid())
+  id          String     @id @default(cuid())
   campaignId  String
-  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  
+  campaign    Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
   contactId   String
-  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  
-  status      String    @default("pending") // pending, sent, delivered, failed
+  contact     Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  status      String     @default("pending") 
   waMessageId String?
   errorMsg    String?
-  
+
   sentAt      DateTime?
   deliveredAt DateTime?
-  createdAt   DateTime  @default(now())
-  
+  createdAt   DateTime   @default(now())
+
   @@map("messages")
 }
