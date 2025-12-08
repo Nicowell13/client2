@@ -17,12 +17,21 @@ type CampaignWithRelations = Awaited<ReturnType<typeof prisma.campaign.findUniqu
 =========================================================== */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, message, imageUrl, sessionId, buttons } = req.body;
+    const { name, message, variants, imageUrl, sessionId, buttons } = req.body;
 
-    if (!name || !message || !sessionId) {
+    // Support both single message and multi-message variants
+    if (!name || !sessionId) {
       return res.status(400).json({
         success: false,
-        message: 'Name, message & sessionId are required',
+        message: 'Name & sessionId are required',
+      });
+    }
+
+    // Validate: need either message OR variants
+    if (!message && (!variants || variants.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Either message or variants is required',
       });
     }
 
@@ -34,7 +43,8 @@ router.post('/', async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        message,
+        message: message || '', // fallback empty if using variants
+        variants: variants || [], // store variants array
         imageUrl: imageUrl || null,
         sessionId,
       },
