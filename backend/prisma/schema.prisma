@@ -1,8 +1,8 @@
-// ------------------------------
-// Prisma Generator & Datasource
-// ------------------------------
+// =========================================================
+// GENERATOR & DATASOURCE
+// =========================================================
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-1.1.x"]
 }
 
@@ -11,15 +11,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ------------------------------
-// User Model
-// ------------------------------
+// =========================================================
+// USER MODEL
+// =========================================================
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   password  String
   name      String
-  role      String   @default("user")   // user, admin
+  role      String   @default("user")  // user, admin
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -27,28 +27,29 @@ model User {
   @@map("users")
 }
 
-// ------------------------------
-// Session Model
-// ------------------------------
+// =========================================================
+// SESSION MODEL
+// =========================================================
 model Session {
-  id          String    @id @default(cuid())
-  name        String    @default("default")
-  sessionId   String    @unique         // WAHA session name
-  status      String    @default("stopped")
+  id          String     @id @default(cuid())
+  name        String     @default("default")
+  sessionId   String     @unique
+  status      String     @default("stopped")
   qrCode      String?
   phoneNumber String?
-  isDefault   Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isDefault   Boolean    @default(true)
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   campaigns   Campaign[]
 
   @@map("sessions")
 }
 
-// ------------------------------
-// Contact Model
-// ------------------------------
+// =========================================================
+// CONTACT MODEL
+// =========================================================
 model Contact {
   id          String    @id @default(cuid())
   name        String
@@ -59,71 +60,81 @@ model Contact {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  messages    Message[]
+  messagesList Message[] @relation("ContactMessages")
 
   @@unique([phoneNumber])
   @@map("contacts")
 }
 
-// ------------------------------
-// Campaign Model
-// ------------------------------
+// =========================================================
+// CAMPAIGN MODEL
+// =========================================================
 model Campaign {
-  id            String    @id @default(cuid())
+  id            String     @id @default(cuid())
   name          String
+
+  // single message (fallback)
   message       String     @db.Text
-  messages      String[]   @default([])      // multi-variant messages
+
+  // multi-variant messages
+  messages      String[]   @default([])
+
   imageUrl      String?
-  status        String     @default("draft") // draft, sending, sent, failed
+  status        String      @default("draft") // draft, sending, sent, failed
 
   sessionId     String
-  session       Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session       Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   scheduledAt   DateTime?
   sentAt        DateTime?
-  totalContacts Int        @default(0)
-  sentCount     Int        @default(0)
-  failedCount   Int        @default(0)
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  totalContacts Int         @default(0)
+  sentCount     Int         @default(0)
+  failedCount   Int         @default(0)
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   buttons       Button[]
 
-  // LOG: all sent message statuses
-  messagesList  Message[]  @relation("CampaignMessages")
+  // relation ke Message logs
+  messagesList  Message[]   @relation("CampaignMessages")
 
   @@map("campaigns")
 }
 
-// ------------------------------
-// Button Model
-// ------------------------------
+// =========================================================
+// BUTTON MODEL
+// =========================================================
 model Button {
   id          String    @id @default(cuid())
+
   campaignId  String
   campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   label       String
   url         String
-  order       Int       @default(1)
+  order       Int       @default(1) // 1 or 2
 
   createdAt   DateTime  @default(now())
 
   @@map("buttons")
 }
 
-// ------------------------------
-// Message Log Model
-// ------------------------------
+// =========================================================
+// MESSAGE LOG MODEL
+// =========================================================
 model Message {
   id          String    @id @default(cuid())
 
   campaignId  String
   contactId   String
 
+  // relasi ke campaign
   campaign    Campaign @relation("CampaignMessages", fields: [campaignId], references: [id], onDelete: Cascade)
-  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  // relasi ke contact
+  contact     Contact  @relation("ContactMessages", fields: [contactId], references: [id], onDelete: Cascade)
 
   status      String    @default("pending") // pending, sent, delivered, failed
   waMessageId String?
@@ -131,6 +142,7 @@ model Message {
 
   sentAt      DateTime?
   deliveredAt DateTime?
+
   createdAt   DateTime  @default(now())
 
   @@map("messages")

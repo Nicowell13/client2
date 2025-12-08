@@ -5,8 +5,7 @@ export type QRFormat = 'json' | 'png' | 'raw';
 
 export interface QRResponse {
   format: QRFormat;
-  // bebas; tergantung WAHA, jadi pakai any saja
-  data: any;
+  data: any; // bentuk response tergantung WAHA
 }
 
 export interface ScreenshotResponse {
@@ -35,7 +34,9 @@ class WahaService {
     console.log('[WAHA] Base URL:', this.baseUrl, '| API key set:', !!this.apiKey);
   }
 
-  // ===== Session Management =====
+  // =========================================================
+  // SESSION MANAGEMENT
+  // =========================================================
 
   async startSession(sessionName: string = 'default') {
     try {
@@ -73,34 +74,43 @@ class WahaService {
 
   async getQRCode(sessionName: string = 'default'): Promise<QRResponse> {
     try {
-      // 1. JSON (base64)
-      const jsonResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
-        headers: { accept: 'application/json' },
-        validateStatus: () => true,
-      });
+      // 1) JSON (base64)
+      const jsonResp = await this.client.get(
+        `/api/${encodeURIComponent(sessionName)}/auth/qr`,
+        {
+          headers: { accept: 'application/json' },
+          validateStatus: () => true,
+        }
+      );
 
       if (jsonResp.status === 200 && jsonResp.data) {
         return { format: 'json', data: jsonResp.data };
       }
 
-      // 2. PNG binary
-      const pngResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
-        headers: { accept: 'image/png' },
-        responseType: 'arraybuffer',
-        validateStatus: () => true,
-      });
+      // 2) PNG binary
+      const pngResp = await this.client.get(
+        `/api/${encodeURIComponent(sessionName)}/auth/qr`,
+        {
+          headers: { accept: 'image/png' },
+          responseType: 'arraybuffer',
+          validateStatus: () => true,
+        }
+      );
 
       if (pngResp.status === 200 && pngResp.data) {
         const base64 = Buffer.from(pngResp.data, 'binary').toString('base64');
         return { format: 'png', data: `data:image/png;base64,${base64}` };
       }
 
-      // 3. Raw text value
-      const rawResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
-        headers: { accept: 'application/json' },
-        params: { format: 'raw' },
-        validateStatus: () => true,
-      });
+      // 3) RAW text value
+      const rawResp = await this.client.get(
+        `/api/${encodeURIComponent(sessionName)}/auth/qr`,
+        {
+          headers: { accept: 'application/json' },
+          params: { format: 'raw' },
+          validateStatus: () => true,
+        }
+      );
 
       if (rawResp.status === 200 && rawResp.data) {
         return { format: 'raw', data: rawResp.data };
@@ -140,7 +150,10 @@ class WahaService {
 
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA][PAIR] Failed to request pairing code:', error?.response?.data || error?.message);
+      console.error(
+        '[WAHA][PAIR] Failed to request pairing code:',
+        error?.response?.data || error?.message
+      );
       throw new Error(`Failed to request pairing code: ${error?.message || 'Unknown error'}`);
     }
   }
@@ -149,7 +162,7 @@ class WahaService {
     const url = `/api/screenshot?session=${encodeURIComponent(sessionName)}`;
 
     try {
-      // 1. JSON (Base64File)
+      // 1) JSON (Base64File)
       const jsonResp = await this.client.get(url, {
         headers: { accept: 'application/json' },
         responseType: 'json',
@@ -160,7 +173,7 @@ class WahaService {
         return { format: 'json', data: jsonResp.data };
       }
 
-      // 2. JPEG binary
+      // 2) JPEG binary
       const jpegResp = await this.client.get(url, {
         headers: { accept: 'image/jpeg' },
         responseType: 'arraybuffer',
@@ -179,14 +192,19 @@ class WahaService {
 
       throw new Error('Screenshot endpoint returned non-200');
     } catch (error: any) {
-      console.error('[WAHA][SCREENSHOT] Failed to get screenshot:', error?.response?.data || error?.message);
+      console.error(
+        '[WAHA][SCREENSHOT] Failed to get screenshot:',
+        error?.response?.data || error?.message
+      );
       throw new Error(`Failed to get session screenshot: ${error?.message || 'Unknown error'}`);
     }
   }
 
   async getSessionStatus(sessionName: string = 'default') {
     try {
-      const response = await this.client.get(`/api/sessions/${encodeURIComponent(sessionName)}`);
+      const response = await this.client.get(
+        `/api/sessions/${encodeURIComponent(sessionName)}`
+      );
       return response.data;
     } catch (error: any) {
       console.error('[WAHA] Failed to get session status:', error?.response?.data || error?.message);
@@ -204,7 +222,9 @@ class WahaService {
     }
   }
 
-  // ===== Messaging =====
+  // =========================================================
+  // MESSAGING
+  // =========================================================
 
   async sendTextMessage(sessionName: string, phoneNumber: string, text: string) {
     try {
@@ -215,7 +235,10 @@ class WahaService {
       });
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA] Failed to send text message:', error?.response?.data || error?.message);
+      console.error(
+        '[WAHA] Failed to send text message:',
+        error?.response?.data || error?.message
+      );
       throw new Error(`Failed to send text message: ${error?.message || 'Unknown error'}`);
     }
   }
@@ -230,23 +253,28 @@ class WahaService {
       const response = await this.client.post('/api/sendImage', {
         session: sessionName,
         chatId: `${phoneNumber}@c.us`,
-        file: {
-          url: imageUrl,
-        },
+        file: { url: imageUrl },
         caption,
       });
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA] Failed to send image message:', error?.response?.data || error?.message);
+      console.error(
+        '[WAHA] Failed to send image message:',
+        error?.response?.data || error?.message
+      );
       throw new Error(`Failed to send image message: ${error?.message || 'Unknown error'}`);
     }
   }
 
+  /**
+   * Kirim native WhatsApp buttons (WAHA Plus) via /api/sendButtons.
+   * buttons: [{ id, text, url? }]
+   */
   async sendButtonMessage(
     sessionName: string,
     phoneNumber: string,
     text: string,
-    buttons: Array<{ id: string; text: string }>,
+    buttons: Array<{ id: string; text: string; url?: string }>,
     imageUrl?: string
   ) {
     try {
@@ -265,12 +293,19 @@ class WahaService {
       const response = await this.client.post('/api/sendButtons', payload);
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA] Failed to send button message:', error?.response?.data || error?.message);
+      console.error(
+        '[WAHA] Failed to send button message:',
+        error?.response?.data || error?.message
+      );
       throw new Error(`Failed to send button message: ${error?.message || 'Unknown error'}`);
     }
   }
 
-  // WAHA Free: kirim URL sebagai teks pengganti tombol native
+  /**
+   * Abstraksi yang dipakai oleh campaign/queue:
+   * - Jika WAHA Plus mendukung /api/sendButtons → kirim interactive buttons seperti screenshot ke-2.
+   * - Kalau gagal (misal 422 / tidak support) → fallback ke teks biasa + daftar URL (mode lama).
+   */
   async sendMessageWithButtons(
     sessionName: string,
     phoneNumber: string,
@@ -278,6 +313,42 @@ class WahaService {
     imageUrl: string | null,
     buttons: Array<{ label: string; url: string }>
   ) {
+    // --- kalau tidak ada button, langsung kirim text / image biasa ---
+    if (!buttons || buttons.length === 0) {
+      if (imageUrl) {
+        return this.sendImageMessage(sessionName, phoneNumber, imageUrl, message);
+      }
+      return this.sendTextMessage(sessionName, phoneNumber, message);
+    }
+
+    // -----------------------------------------------------------
+    // 1. Coba kirim NATIVE BUTTONS (WAHA PLUS)
+    // -----------------------------------------------------------
+    const waButtons = buttons.map((btn, index) => ({
+      id: `btn_${index + 1}`,
+      text: btn.label,
+      url: btn.url, // URL button; jika WAHA hanya support quick reply, cukup hapus field ini
+    }));
+
+    try {
+      return await this.sendButtonMessage(
+        sessionName,
+        phoneNumber,
+        message,
+        waButtons,
+        imageUrl || undefined
+      );
+    } catch (error: any) {
+      // Kalau sendButtons error (misalnya 422 di instance lama) → fallback ke mode teks
+      console.warn(
+        '[WAHA] sendButtons failed, falling back to plain text buttons:',
+        error?.response?.data || error?.message
+      );
+    }
+
+    // -----------------------------------------------------------
+    // 2. FALLBACK: kirim teks + daftar URL (mode WAHA Free)
+    // -----------------------------------------------------------
     try {
       let fullMessage = message + '\n\n';
 
@@ -291,8 +362,13 @@ class WahaService {
 
       return await this.sendTextMessage(sessionName, phoneNumber, fullMessage);
     } catch (error: any) {
-      console.error('[WAHA] Failed to send message with buttons:', error?.response?.data || error?.message);
-      throw new Error(`Failed to send message with buttons: ${error?.message || 'Unknown error'}`);
+      console.error(
+        '[WAHA] Failed to send message with buttons (fallback):',
+        error?.response?.data || error?.message
+      );
+      throw new Error(
+        `Failed to send message with buttons: ${error?.message || 'Unknown error'}`
+      );
     }
   }
 }
