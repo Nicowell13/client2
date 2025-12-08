@@ -29,9 +29,9 @@ services:
       - whatsapp-network
     restart: unless-stopped
 
-  # WAHA (WhatsApp HTTP API)
+  # WAHA Plus (WhatsApp HTTP API - Premium Version)
   waha:
-    image: devlikeapro/waha:latest
+    image: devlikeapro/waha-plus:latest
     container_name: whatsapp-waha
     ports:
       - "3000:3000"
@@ -44,12 +44,15 @@ services:
       # Security - API Key untuk autentikasi
       - WHATSAPP_API_KEY=${WAHA_API_KEY:-116e0222dfb5d86824e45ee9488d931b2b8924b63eb3766e1fb633ef3c934289}
       
+      # WAHA Plus License (required for waha-plus)
+      - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
+      
       # Session configuration
       - WHATSAPP_RESTART_ALL_SESSIONS=True
       - WHATSAPP_START_SESSIONS=default
       
-      # Engine (WEBJS recommended for stability)
-      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      # Engine (WEBJS recommended for stability, NOWEB for WAHA Plus features)
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
       
       # Webhook configuration
       - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
