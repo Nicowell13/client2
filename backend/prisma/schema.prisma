@@ -1,6 +1,6 @@
-// This is your Prisma schema file
-// Learn more: https://pris.ly/d/prisma-schema
-
+// ------------------------------
+// Prisma Generator & Datasource
+// ------------------------------
 generator client {
   provider = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-1.1.x"]
@@ -11,12 +11,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ------------------------------
+// User Model
+// ------------------------------
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   password  String
   name      String
-  role      String   @default("user") 
+  role      String   @default("user")   // user, admin
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -24,22 +27,28 @@ model User {
   @@map("users")
 }
 
+// ------------------------------
+// Session Model
+// ------------------------------
 model Session {
-  id          String     @id @default(cuid())
-  name        String     @default("default")
-  sessionId   String     @unique
-  status      String     @default("stopped") 
+  id          String    @id @default(cuid())
+  name        String    @default("default")
+  sessionId   String    @unique         // WAHA session name
+  status      String    @default("stopped")
   qrCode      String?
   phoneNumber String?
-  isDefault   Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  isDefault   Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   campaigns   Campaign[]
 
   @@map("sessions")
 }
 
+// ------------------------------
+// Contact Model
+// ------------------------------
 model Contact {
   id          String    @id @default(cuid())
   name        String
@@ -56,13 +65,17 @@ model Contact {
   @@map("contacts")
 }
 
+// ------------------------------
+// Campaign Model
+// ------------------------------
 model Campaign {
   id            String    @id @default(cuid())
   name          String
-  message       String     @db.Text      // default message (WAHA uses this)
-  messages      String[]   @default([])  // MULTIPLE MESSAGE VARIANTS
+  message       String     @db.Text
+  messages      String[]   @default([])      // multi-variant messages
   imageUrl      String?
-  status        String     @default("draft")
+  status        String     @default("draft") // draft, sending, sent, failed
+
   sessionId     String
   session       Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -76,43 +89,49 @@ model Campaign {
   updatedAt     DateTime   @updatedAt
 
   buttons       Button[]
-  messagesList  Message[]  @relation("CampaignMessages") // LOG OF SENT MESSAGES
+
+  // LOG: all sent message statuses
+  messagesList  Message[]  @relation("CampaignMessages")
 
   @@map("campaigns")
 }
 
-
-model Message {
+// ------------------------------
+// Button Model
+// ------------------------------
+model Button {
   id          String    @id @default(cuid())
   campaignId  String
   campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  
+
+  label       String
+  url         String
+  order       Int       @default(1)
+
+  createdAt   DateTime  @default(now())
+
+  @@map("buttons")
+}
+
+// ------------------------------
+// Message Log Model
+// ------------------------------
+model Message {
+  id          String    @id @default(cuid())
+
+  campaignId  String
   contactId   String
-  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  
-  status      String    @default("pending")
+
+  campaign    Campaign @relation("CampaignMessages", fields: [campaignId], references: [id], onDelete: Cascade)
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  status      String    @default("pending") // pending, sent, delivered, failed
   waMessageId String?
   errorMsg    String?
-  
+
   sentAt      DateTime?
   deliveredAt DateTime?
   createdAt   DateTime  @default(now())
 
   @@map("messages")
 }
-
-
-model Button {
-  id          String     @id @default(cuid())
-  campaignId  String
-  campaign    Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  label       String
-  url         String
-  order       Int        @default(1)
-
-  createdAt   DateTime   @default(now())
-
-  @@map("buttons")
-}
-
