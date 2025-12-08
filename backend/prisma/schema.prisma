@@ -59,27 +59,28 @@ model Contact {
 model Campaign {
   id            String    @id @default(cuid())
   name          String
-  message       String    @db.Text
-  variants      String[]  @default([])    // multiple text variants
+  message       String     @db.Text      // default message (WAHA uses this)
+  messages      String[]   @default([])  // MULTIPLE MESSAGE VARIANTS
   imageUrl      String?
-  status        String    @default("draft")
+  status        String     @default("draft")
   sessionId     String
-  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session       Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   scheduledAt   DateTime?
   sentAt        DateTime?
-  totalContacts Int       @default(0)
-  sentCount     Int       @default(0)
-  failedCount   Int       @default(0)
+  totalContacts Int        @default(0)
+  sentCount     Int        @default(0)
+  failedCount   Int        @default(0)
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   buttons       Button[]
-  messages      Message[]  // ← THIS is the only relation to Message
+  messagesList  Message[]  @relation("CampaignMessages") // LOG OF SENT MESSAGES
 
   @@map("campaigns")
 }
+
 
 model Message {
   id          String    @id @default(cuid())
