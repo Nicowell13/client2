@@ -59,30 +59,47 @@ model Contact {
 model Campaign {
   id            String    @id @default(cuid())
   name          String
-
-  // MULTI MESSAGE SYSTEM
-  message       String     @db.Text     // legacy support (optional)
-  variants      String[]   @default([]) // <— New: many variations for random sending
-
+  message       String    @db.Text
+  variants      String[]  @default([])    // multiple text variants
   imageUrl      String?
-  status        String     @default("draft")
+  status        String    @default("draft")
   sessionId     String
-  session       Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   scheduledAt   DateTime?
   sentAt        DateTime?
-  totalContacts Int        @default(0)
-  sentCount     Int        @default(0)
-  failedCount   Int        @default(0)
+  totalContacts Int       @default(0)
+  sentCount     Int       @default(0)
+  failedCount   Int       @default(0)
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   buttons       Button[]
-  messages      Message[]   // <— Relation to Message (no conflict)
+  messages      Message[]  // ← THIS is the only relation to Message
 
   @@map("campaigns")
 }
+
+model Message {
+  id          String    @id @default(cuid())
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  contactId   String
+  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  status      String    @default("pending")
+  waMessageId String?
+  errorMsg    String?
+  
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("messages")
+}
+
 
 model Button {
   id          String     @id @default(cuid())
@@ -98,21 +115,3 @@ model Button {
   @@map("buttons")
 }
 
-model Message {
-  id          String     @id @default(cuid())
-  campaignId  String
-  campaign    Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  contactId   String
-  contact     Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
-
-  status      String     @default("pending") 
-  waMessageId String?
-  errorMsg    String?
-
-  sentAt      DateTime?
-  deliveredAt DateTime?
-  createdAt   DateTime   @default(now())
-
-  @@map("messages")
-}
