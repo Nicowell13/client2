@@ -197,4 +197,33 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+/* ===========================================================
+    GET ALL MESSAGES (for real-time tracking)
+=========================================================== */
+router.get('/messages/all', async (_req: Request, res: Response) => {
+  try {
+    const messages = await prisma.message.findMany({
+      include: {
+        contact: {
+          select: {
+            name: true,
+            phoneNumber: true,
+          },
+        },
+        campaign: {
+          select: {
+            name: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json({ success: true, data: messages });
+  } catch (err: any) {
+    console.error('[MESSAGES][LIST]', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 export default router;

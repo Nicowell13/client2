@@ -2,9 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
-import { campaignAPI } from '@/lib/api-client';
+import { messageAPI } from '@/lib/api-client';
 
 interface Message {
   id: string;
@@ -35,24 +33,20 @@ export default function MessagesPage() {
 
   const fetchMessages = async () => {
     try {
-      const resp = await campaignAPI.getAll();
-      const campaigns = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
-      const allMessages: Message[] = [];
+      const response = await messageAPI.getAll();
+      const data = response.data;
       
-      for (const campaign of campaigns) {
-        try {
-          const { data: detail } = await campaignAPI.getAll(); // Ideally use a specific endpoint
-          if (detail?.messages) {
-            allMessages.push(...detail.messages);
-          }
-        } catch (err) {
-          console.error('Error fetching campaign detail:', err);
-        }
+      // Handle different response formats
+      if (Array.isArray(data)) {
+        setMessages(data);
+      } else if (data?.data && Array.isArray(data.data)) {
+        setMessages(data.data);
+      } else {
+        setMessages([]);
       }
-      
-      setMessages(allMessages);
     } catch (error) {
-      console.error('Failed to load messages');
+      console.error('Failed to load messages:', error);
+      setMessages([]);
     } finally {
       setLoading(false);
     }

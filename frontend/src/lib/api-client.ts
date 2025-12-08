@@ -115,6 +115,8 @@ export const campaignAPI = {
 // MESSAGES API
 // =========================
 export const messageAPI = {
+  getAll: () => api.get('/api/campaigns/messages/all'),
+  
   getByCampaign: (campaignId: string) =>
     api.get(`/api/campaigns/${campaignId}/messages`),
 };
