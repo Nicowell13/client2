@@ -42,7 +42,7 @@ services:
       - WHATSAPP_API_HOSTNAME=0.0.0.0
       
       # Security - API Key untuk autentikasi
-      - WHATSAPP_API_KEY=${WAHA_API_KEY:-116e0222dfb5d86824e45ee9488d931b2b8924b63eb3766e1fb633ef3c934289}
+      - WHATSAPP_API_KEY=${WAHA_API_KEY:-2b0f9b8281f541d0b25cf3b76d81615a}
       
       # WAHA Plus License (required for waha-plus)
       - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
