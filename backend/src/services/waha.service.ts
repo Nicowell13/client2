@@ -31,7 +31,7 @@ class WahaService {
       },
     });
 
-    console.log("[WAHA] Base URL:", this.baseUrl, "| API key set:", !!this.apiKey);
+    console.log("[WAHA] Base URL:", this.baseUrl, "| API key:", !!this.apiKey);
   }
 
   // =====================================================================
@@ -40,55 +40,50 @@ class WahaService {
 
   async startSession(sessionName: string = "default") {
     try {
-      const response = await this.client.post("/api/sessions/start", {
+      const res = await this.client.post("/api/sessions/start", {
         name: sessionName,
         config: {
           proxy: null,
           webhooks: [
             {
-              url: `${process.env.BACKEND_URL || "http://backend:4000"}/webhook/whatsapp`,
+              url: `${process.env.BACKEND_URL}/webhook/whatsapp`,
               events: ["message", "session.status"],
             },
           ],
         },
       });
-
-      return response.data;
-    } catch (error: any) {
-      console.error("[WAHA] Failed to start session:", error?.response?.data || error?.message);
-      throw error;
+      return res.data;
+    } catch (e: any) {
+      console.error("[WAHA] startSession FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
   async stopSession(sessionName: string = "default") {
     try {
-      const response = await this.client.post("/api/sessions/stop", {
-        name: sessionName,
-      });
-
-      return response.data;
-    } catch (error: any) {
-      console.error("[WAHA] Failed to stop session:", error?.response?.data || error?.message);
-      throw error;
+      const res = await this.client.post("/api/sessions/stop", { name: sessionName });
+      return res.data;
+    } catch (e: any) {
+      console.error("[WAHA] stopSession FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
   async getSessionStatus(sessionName: string = "default") {
     try {
-      const res = await this.client.get(`/api/sessions/${encodeURIComponent(sessionName)}`);
-      return res.data;
-    } catch (error: any) {
-      console.error("[WAHA] Failed to get session status:", error?.response?.data || error?.message);
-      throw error;
+      return (await this.client.get(`/api/sessions/${sessionName}`)).data;
+    } catch (e: any) {
+      console.error("[WAHA] getSessionStatus FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
   async listSessions() {
     try {
       return (await this.client.get("/api/sessions")).data;
-    } catch (error: any) {
-      console.error("[WAHA] Failed to list sessions:", error?.response?.data || error?.message);
-      throw error;
+    } catch (e: any) {
+      console.error("[WAHA] listSessions FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
@@ -98,7 +93,6 @@ class WahaService {
 
   async getQRCode(sessionName: string = "default"): Promise<QRResponse> {
     try {
-      // JSON QR
       const jsonResp = await this.client.get(`/api/${sessionName}/auth/qr`, {
         headers: { accept: "application/json" },
         validateStatus: () => true,
@@ -106,22 +100,10 @@ class WahaService {
 
       if (jsonResp.status === 200) return { format: "json", data: jsonResp.data };
 
-      // PNG QR
-      const pngResp = await this.client.get(`/api/${sessionName}/auth/qr`, {
-        headers: { accept: "image/png" },
-        responseType: "arraybuffer",
-        validateStatus: () => true,
-      });
-
-      if (pngResp.status === 200) {
-        const base64 = Buffer.from(pngResp.data).toString("base64");
-        return { format: "png", data: `data:image/png;base64,${base64}` };
-      }
-
-      throw new Error("QR endpoint returned non-200");
-    } catch (error: any) {
-      console.error("[WAHA][QR] FAILED:", error?.response?.data || error?.message);
-      throw error;
+      return { format: "raw", data: null };
+    } catch (e: any) {
+      console.error("[WAHA][QR] FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
@@ -131,11 +113,10 @@ class WahaService {
         `/api/${encodeURIComponent(sessionName)}/auth/request-code`,
         { phoneNumber }
       );
-
       return res.data;
-    } catch (error: any) {
-      console.error("[WAHA][PAIR] Failed:", error?.response?.data || error?.message);
-      throw error;
+    } catch (e: any) {
+      console.error("[WAHA][PAIR] FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
@@ -147,6 +128,7 @@ class WahaService {
     const url = `/api/screenshot?session=${encodeURIComponent(sessionName)}`;
 
     try {
+      // JSON first (base64)
       const jsonResp = await this.client.get(url, {
         headers: { accept: "application/json" },
         responseType: "json",
@@ -157,6 +139,7 @@ class WahaService {
         return { format: "json", data: jsonResp.data };
       }
 
+      // JPEG fallback
       const jpegResp = await this.client.get(url, {
         headers: { accept: "image/jpeg" },
         responseType: "arraybuffer",
@@ -168,29 +151,29 @@ class WahaService {
         return { format: "jpeg", data: `data:image/jpeg;base64,${base64}` };
       }
 
-      throw new Error("Screenshot endpoint failed");
-    } catch (error: any) {
-      console.error("[WAHA][SCREENSHOT] FAILED:", error?.response?.data || error?.message);
-      throw error;
+      throw new Error("Screenshot endpoint returned non-200");
+    } catch (e: any) {
+      console.error("[WAHA][SCREENSHOT] FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
   // =====================================================================
-  // BASIC MESSAGING
+  // BASIC MESSAGES
   // =====================================================================
 
   async sendTextMessage(sessionName: string, phoneNumber: string, text: string) {
     try {
-      const res = await this.client.post("/api/sendText", {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-        text,
-      });
-
-      return res.data;
-    } catch (error: any) {
-      console.error("[WAHA] sendText FAILED:", error?.response?.data || error?.message);
-      throw error;
+      return (
+        await this.client.post("/api/sendText", {
+          session: sessionName,
+          phone: phoneNumber, // FIX for WebJS
+          text,
+        })
+      ).data;
+    } catch (e: any) {
+      console.error("[WAHA] sendText FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
@@ -201,65 +184,62 @@ class WahaService {
     caption?: string
   ) {
     try {
-      const res = await this.client.post("/api/sendImage", {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-        file: { url: imageUrl },
-        caption,
-      });
-
-      return res.data;
-    } catch (error: any) {
-      console.error("[WAHA] sendImage FAILED:", error?.response?.data || error?.message);
-      throw error;
+      return (
+        await this.client.post("/api/sendImage", {
+          session: sessionName,
+          phone: phoneNumber, // FIX for WebJS
+          file: { url: imageUrl },
+          caption,
+        })
+      ).data;
+    } catch (e: any) {
+      console.error("[WAHA] sendImage FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
   // =====================================================================
-  // WAHA PLUS — TRUE NATIVE INTERACTIVE BUTTONS (URL BUTTONS)
+  // WEBJS TEMPLATE BUTTONS (NATIVE)
   // =====================================================================
 
-  async sendButtonMessage(
-    sessionName: string,
-    phoneNumber: string,
-    message: string,
-    buttons: Array<{ label: string; url: string }>,
-    imageUrl?: string
-  ) {
+  async sendButtonTemplate({
+    session,
+    phoneNumber,
+    header,
+    headerImage,
+    body,
+    footer,
+    buttons,
+  }: {
+    session: string;
+    phoneNumber: string;
+    header: string;
+    headerImage?: any;
+    body: string;
+    footer: string;
+    buttons: Array<{ type: string; text: string; url?: string }>;
+  }) {
     const payload: any = {
-      session: sessionName,
-      chatId: `${phoneNumber}@c.us`,
-
-      header: "Informasi",
-      body: message,
-      footer: "Silakan pilih tombol 👇",
-
-      buttons: buttons.map((b) => ({
-        type: "url",
-        text: b.label,
-        url: b.url,
-      })),
+      session,
+      phone: phoneNumber, // FIX
+      header,
+      body,
+      footer,
+      buttons,
     };
 
-    if (imageUrl) {
-      payload.headerImage = {
-        mimetype: "image/jpeg",
-        filename: "image.jpg",
-        url: imageUrl,
-      };
-    }
+    if (headerImage) payload.headerImage = headerImage;
 
     try {
-      const res = await this.client.post("/api/sendButtons", payload);
-      return res.data;
-    } catch (error: any) {
-      console.error("[WAHA PLUS] sendButtons FAILED:", error?.response?.data || error?.message);
-      throw error;
+      return (await this.client.post("/api/sendButtons", payload)).data;
+    } catch (e: any) {
+      console.error("[WAHA] sendButtonTemplate FAILED:", e?.response?.data || e.message);
+      throw e;
     }
   }
 
   // =====================================================================
-  // UNIVERSAL — USED BY QUEUE / CAMPAIGN (AUTO FALLBACK)
+  // UNIVERSAL BUTTON-SENDER FOR CAMPAIGNS / QUEUE
   // =====================================================================
 
   async sendMessageWithButtons(
@@ -269,27 +249,39 @@ class WahaService {
     imageUrl: string | null,
     buttons: Array<{ label: string; url: string }>
   ) {
-    // 1) Coba native WAHA PLUS dulu
+    const payloadButtons = buttons.map((b) => ({
+      type: "url",
+      text: b.label,
+      url: b.url,
+    }));
+
     try {
-      return await this.sendButtonMessage(
-        sessionName,
+      return await this.sendButtonTemplate({
+        session: sessionName,
         phoneNumber,
-        message,
-        buttons,
-        imageUrl || undefined
-      );
-    } catch (error) {
-      console.warn("[WAHA] Native buttons unsupported → fallback to text.");
+        header: "Informasi",
+        headerImage: imageUrl
+          ? {
+              mimetype: "image/jpeg",
+              filename: "header.jpg",
+              url: imageUrl,
+            }
+          : undefined,
+        body: message,
+        footer: "Silakan pilih tombol 👇",
+        buttons: payloadButtons,
+      });
+    } catch (e) {
+      console.warn("[WAHA] Template button failed → fallback text mode.");
+
+      let full = message + "\n\n";
+      buttons.forEach((b, i) => (full += `${i + 1}. ${b.label}: ${b.url}\n`));
+
+      if (imageUrl) {
+        return this.sendImageMessage(sessionName, phoneNumber, imageUrl, full);
+      }
+      return this.sendTextMessage(sessionName, phoneNumber, full);
     }
-
-    // 2) FALLBACK WAHA FREE — buttons jadi teks
-    let full = message + "\n\n";
-    buttons.forEach((b, i) => {
-      full += `${i + 1}. ${b.label}: ${b.url}\n`;
-    });
-
-    if (imageUrl) return this.sendImageMessage(sessionName, phoneNumber, imageUrl, full);
-    return this.sendTextMessage(sessionName, phoneNumber, full);
   }
 }
 
