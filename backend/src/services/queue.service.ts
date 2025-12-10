@@ -13,15 +13,13 @@ export const campaignQueue = new Bull('campaign-messages', REDIS_URL, {
   defaultJobOptions: {
     removeOnComplete: true,
     removeOnFail: false,
-    // Reduce to single attempt to avoid duplicate sends/spam if WAHA already succeeded
-    attempts: 1,
-    // No backoff needed when avoiding retries
+    attempts: 1, // Only 1 attempt to avoid double-send
     backoff: undefined as any,
   },
 });
 
 /* ============================================================
-   JOB PAYLOAD
+   JOB PAYLOAD TYPES
 ============================================================ */
 interface CampaignJob {
   campaignId: string;
@@ -36,25 +34,48 @@ interface CampaignJob {
 }
 
 /* ============================================================
-   UTILS: RANDOM DELAY + SAFE SEND (AUTO RETRY)
+   UTILS: DELAY + SAFE SEND
 ============================================================ */
 function random(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Human-like delay: 7–12 seconds + extra delay every 5 messages
 function calcMessageDelay(index: number): number {
   const base = random(7000, 12000);
   const extra = Math.floor(index / 5) * random(8000, 15000);
   return base + extra;
 }
 
-// Batch cooldown to reduce spam detection
-function batchCooldown(batchIndex: number): number {
+function batchCooldown(batchIndex: number) {
   return batchIndex === 0 ? 0 : random(20000, 30000);
 }
 
-// Auto retry WAHA inside job, not just Bull attempts
+/**
+ * 🔥 FIX UTAMA:
+ * Normalisasi WAHA messageId agar Prisma menerima STRING, bukan OBJECT
+ */
+function extractWAId(result: any): string | null {
+  if (!result) return null;
+
+  // WEBJS & NOWEB: id object
+  if (result.id && typeof result.id === "object") {
+    if (result.id._serialized) return result.id._serialized;
+    if (result.id.id) return String(result.id.id);
+  }
+
+  // Pure string id
+  if (typeof result.id === "string") return result.id;
+
+  // Other engines
+  if (result.key?.id) return result.key.id;
+  if (result.messageId) return result.messageId;
+
+  return null;
+}
+
+/**
+ * Auto retry inside WAHA request
+ */
 async function safeSendMessage(fn: () => Promise<any>, retries = 1) {
   let lastError;
   for (let i = 0; i < retries; i++) {
@@ -86,41 +107,41 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   } = job.data;
 
   try {
-    /* -----------------------------------------
-       RANDOM MESSAGE SELECTION (ANTI-SPAM)
-    ----------------------------------------- */
+    /* --------------------------------------------------
+       RANDOM MESSAGE (ANTI-SPAM)
+    -------------------------------------------------- */
     const messageToSend = messages[Math.floor(Math.random() * messages.length)];
 
-    /* -----------------------------------------
-       BATCH COOLDOWN (first message only)
-    ----------------------------------------- */
+    /* --------------------------------------------------
+       BATCH + NATURAL DELAY
+    -------------------------------------------------- */
     if (messageIndex === 0) {
       const cooldown = batchCooldown(batchIndex);
-      console.log(
-        `🧊 Batch ${batchIndex} cooldown ${cooldown}ms for campaign ${campaignId}`
-      );
+      console.log(`🧊 Batch ${batchIndex} cooldown ${cooldown}ms`);
       await new Promise(r => setTimeout(r, cooldown));
     }
 
-    /* -----------------------------------------
-       NATURAL DELAY PER MESSAGE
-    ----------------------------------------- */
     const delay = calcMessageDelay(messageIndex);
-    console.log(
-      `⏳ Delay message ${messageIndex + 1} in batch ${batchIndex} by ${delay}ms`
-    );
+    console.log(`⏳ Delay ${delay}ms before sending message ${messageIndex}`);
     await new Promise(r => setTimeout(r, delay));
 
-    // Compose final text: append buttons as text links, not interactive buttons
+    /* --------------------------------------------------
+       BUILD FINAL MESSAGE: TEXT + URL BUTTONS
+       (WEBJS cannot send interactive URL buttons)
+    -------------------------------------------------- */
     let text = messageToSend;
+
     if (Array.isArray(buttons) && buttons.length > 0) {
       const buttonsText = buttons
-        .map((b: any, idx: number) => `${idx + 1}. ${b.label}\n${b.url}`)
+        .map((b, i) => `${i + 1}. ${b.label}\n${b.url}`)
         .join("\n\n");
+
       text = `${text}\n\n${buttonsText}`;
     }
 
-    // Send and capture WA message id
+    /* --------------------------------------------------
+       SEND MESSAGE TO WAHA
+    -------------------------------------------------- */
     const result = await safeSendMessage(async () => {
       if (imageUrl) {
         return wahaService.sendImageMessage(sessionName, phoneNumber, imageUrl, text);
@@ -128,14 +149,16 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       return wahaService.sendTextMessage(sessionName, phoneNumber, text);
     });
 
-    /* -----------------------------------------
-       UPDATE MESSAGE → SENT
-    ----------------------------------------- */
+    const waId = extractWAId(result);
+
+    /* --------------------------------------------------
+       UPDATE → SENT
+    -------------------------------------------------- */
     await prisma.message.updateMany({
-      where: { campaignId, contactId, status: 'pending' },
+      where: { campaignId, contactId, status: "pending" },
       data: {
-        status: 'sent',
-        waMessageId: (result && (result.id || result.key?.id || result.messageId)) || null,
+        status: "sent",
+        waMessageId: waId,
         sentAt: new Date(),
       },
     });
@@ -145,18 +168,15 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       data: { sentCount: { increment: 1 } },
     });
 
-    return { success: true, messageId: (result && (result.id || result.key?.id || result.messageId)) || null };
+    return { success: true, messageId: waId };
   } catch (error: any) {
-    console.error('❌ Message sending failed:', error.message);
+    console.error("❌ Message sending failed:", error.message);
 
-    /* -----------------------------------------
-       UPDATE FAILED MESSAGE
-    ----------------------------------------- */
     await prisma.message.updateMany({
-      where: { campaignId, contactId, status: 'pending' },
+      where: { campaignId, contactId, status: "pending" },
       data: {
-        status: 'failed',
-        errorMsg: error.message || 'Unknown error',
+        status: "failed",
+        errorMsg: error.message || "Unknown error",
       },
     });
 
@@ -172,42 +192,41 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
 /* ============================================================
    QUEUE EVENT LISTENERS
 ============================================================ */
-campaignQueue.on('completed', async (job) => {
+campaignQueue.on("completed", async (job) => {
   const { campaignId } = job.data;
 
   const pending = await prisma.message.count({
-    where: { campaignId, status: 'pending' },
+    where: { campaignId, status: "pending" },
   });
 
   if (pending === 0) {
     const total = await prisma.message.count({ where: { campaignId } });
     const failed = await prisma.message.count({
-      where: { campaignId, status: 'failed' },
+      where: { campaignId, status: "failed" },
     });
 
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: {
-        status: failed === total ? 'failed' : 'sent',
-      },
+      data: { status: failed === total ? "failed" : "sent" },
     });
 
-    console.log(`🎉 Campaign ${campaignId} finished! Status updated.`);
+    console.log(`🎉 Campaign ${campaignId} complete`);
   }
 });
 
-campaignQueue.on('failed', async (job, err) => {
+campaignQueue.on("failed", async (job, err) => {
   const { campaignId } = job.data;
+
   console.error(`❌ Job ${job.id} failed: ${err.message}`);
 
   const pending = await prisma.message.count({
-    where: { campaignId, status: 'pending' },
+    where: { campaignId, status: "pending" },
   });
 
   if (pending === 0) {
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: 'failed' },
+      data: { status: "failed" },
     });
   }
 });
