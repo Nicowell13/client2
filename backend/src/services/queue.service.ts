@@ -13,8 +13,10 @@ export const campaignQueue = new Bull('campaign-messages', REDIS_URL, {
   defaultJobOptions: {
     removeOnComplete: true,
     removeOnFail: false,
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 2000 },
+    // Reduce to single attempt to avoid duplicate sends/spam if WAHA already succeeded
+    attempts: 1,
+    // No backoff needed when avoiding retries
+    backoff: undefined as any,
   },
 });
 
@@ -53,7 +55,7 @@ function batchCooldown(batchIndex: number): number {
 }
 
 // Auto retry WAHA inside job, not just Bull attempts
-async function safeSendMessage(fn: () => Promise<any>, retries = 3) {
+async function safeSendMessage(fn: () => Promise<any>, retries = 1) {
   let lastError;
   for (let i = 0; i < retries; i++) {
     try {
