@@ -369,7 +369,7 @@ export default function SessionsPage() {
               Tutup
             </Button>
             <Button onClick={handleCreateSession} isLoading={isCreating}>
-              Buat Sesi
+              Buat Sesions
             </Button>
           </>
         }
