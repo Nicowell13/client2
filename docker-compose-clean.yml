@@ -52,7 +52,7 @@ services:
       - WHATSAPP_START_SESSIONS=default
       
       # Engine (WEBJS recommended for stability, NOWEB for WAHA Plus features)
-      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
       
       # Webhook configuration
       - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status

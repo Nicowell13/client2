@@ -37,8 +37,8 @@ export default function SessionsPage() {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [statusPollTimer, setStatusPollTimer] = useState<NodeJS.Timeout | null>(null);
   const [showPairingUI, setShowPairingUI] = useState(false);
-  // WAHA free supports only 'default' session
-  const [newSessionName] = useState('default');
+  // WAHA Plus: allow up to 3 sessions with custom names
+  const [newSessionName, setNewSessionName] = useState('default');
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
@@ -99,22 +99,26 @@ export default function SessionsPage() {
   };
 
   const handleCreateSession = async () => {
-    // Allow only one session ('default') on WAHA free
-    if (sessions.length >= 1) {
-      toast.error('Silakan hubungi admin untuk menambah sesi.');
+    // WAHA Plus: limit max 3 sessions
+    if (sessions.length >= 3) {
+      toast.error('Maksimal 3 sesi aktif. Silakan hubungi admin untuk menambah sesi.');
       setShowCreateModal(false);
       return;
     }
 
+    const name = (newSessionName || '').trim();
+    if (!name) return toast.error('Nama sesi wajib diisi');
+
     setIsCreating(true);
     try {
-      await sessionAPI.create('default');
-      toast.success('Sesi default berhasil dibuat!');
+      await sessionAPI.create(name);
+      toast.success(`Sesi "${name}" berhasil dibuat!`);
       setShowCreateModal(false);
+      setNewSessionName('');
       fetchSessions();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create session:', error);
-      toast.error('Gagal membuat sesi default');
+      toast.error(error?.response?.data?.message || 'Gagal membuat sesi');
     } finally {
       setIsCreating(false);
     }
@@ -358,7 +362,7 @@ export default function SessionsPage() {
       <Modal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        title="Buat Sesi Default"
+        title="Buat Sesi Baru (maks. 3)"
         footer={
           <>
             <Button variant="outline" onClick={() => setShowCreateModal(false)}>
@@ -370,9 +374,14 @@ export default function SessionsPage() {
           </>
         }
       >
-        <div className="space-y-2">
-          
-          <p className="text-gray-600">Jika Anda membutuhkan lebih dari satu sesi, silakan hubungi admin untuk peningkatan paket.</p>
+        <div className="space-y-3">
+          <label className="text-sm font-medium text-gray-700">Nama Sesi</label>
+          <Input
+            placeholder="Contoh: marketing-1"
+            value={newSessionName}
+            onChange={(e) => setNewSessionName(e.target.value)}
+          />
+          <p className="text-xs text-gray-500">Anda dapat membuat hingga 3 sesi aktif. Jika butuh lebih, silakan hubungi admin.</p>
         </div>
       </Modal>
 

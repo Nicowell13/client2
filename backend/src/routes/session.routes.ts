@@ -16,6 +16,15 @@ router.post('/', async (req: Request, res: Response) => {
 
     console.log('[SESSION] Creating session:', name);
 
+    // Allow custom session names, but limit to max 3 active records
+    const totalSessions = await prisma.session.count();
+    if (totalSessions >= 3) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maksimal 3 sesi aktif. Silakan hubungi admin untuk menambah sesi.',
+      });
+    }
+
     const existing = await prisma.session.findFirst({ where: { sessionId: name } });
     if (existing) {
       return res.json({ success: true, data: existing });
@@ -28,7 +37,9 @@ router.post('/', async (req: Request, res: Response) => {
       const session = await prisma.session.create({
         data: {
           name,
-          sessionId: (wahaSession && (wahaSession.name || wahaSession.session || wahaSession.sessionId)) || name,
+          sessionId:
+            (wahaSession && (wahaSession.name || wahaSession.session || wahaSession.sessionId)) ||
+            name,
           status: 'starting',
           isDefault: true,
         },

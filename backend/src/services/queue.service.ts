@@ -87,8 +87,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
     /* -----------------------------------------
        RANDOM MESSAGE SELECTION (ANTI-SPAM)
     ----------------------------------------- */
-    const messageToSend =
-      messages[Math.floor(Math.random() * messages.length)];
+    const messageToSend = messages[Math.floor(Math.random() * messages.length)];
 
     /* -----------------------------------------
        BATCH COOLDOWN (first message only)
@@ -110,18 +109,22 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
     );
     await new Promise(r => setTimeout(r, delay));
 
-    /* -----------------------------------------
-       SAFE SEND MESSAGE THROUGH WAHA
-    ----------------------------------------- */
-    const result = await safeSendMessage(() =>
-      wahaService.sendMessageWithButtons(
-        sessionName,
-        phoneNumber,
-        messageToSend,
-        imageUrl,
-        buttons
-      )
-    );
+    // Compose final text: append buttons as text links, not interactive buttons
+    let text = messageToSend;
+    if (Array.isArray(buttons) && buttons.length > 0) {
+      const buttonsText = buttons
+        .map((b: any, idx: number) => `${idx + 1}. ${b.label}\n${b.url}`)
+        .join("\n\n");
+      text = `${text}\n\n${buttonsText}`;
+    }
+
+    // Send and capture WA message id
+    const result = await safeSendMessage(async () => {
+      if (imageUrl) {
+        return wahaService.sendImageMessage(sessionName, phoneNumber, imageUrl, text);
+      }
+      return wahaService.sendTextMessage(sessionName, phoneNumber, text);
+    });
 
     /* -----------------------------------------
        UPDATE MESSAGE → SENT
@@ -130,7 +133,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       where: { campaignId, contactId, status: 'pending' },
       data: {
         status: 'sent',
-        waMessageId: result?.id || null,
+        waMessageId: (result && (result.id || result.key?.id || result.messageId)) || null,
         sentAt: new Date(),
       },
     });
@@ -140,7 +143,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       data: { sentCount: { increment: 1 } },
     });
 
-    return { success: true, messageId: result?.id };
+    return { success: true, messageId: (result && (result.id || result.key?.id || result.messageId)) || null };
   } catch (error: any) {
     console.error('❌ Message sending failed:', error.message);
 

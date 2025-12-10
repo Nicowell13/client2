@@ -10,11 +10,11 @@ const router = Router();
 router.use(authMiddleware);
 
 /* ===========================================================
-    CREATE CAMPAIGN — supports messages[]
+  CREATE CAMPAIGN — supports messages[] (frontend) → variants[] (DB)
 =========================================================== */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, messages, imageUrl, sessionId, buttons } = req.body;
+  const { name, messages, imageUrl, sessionId, buttons } = req.body;
 
     if (!name || !sessionId)
       return res.status(400).json({ success: false, message: 'Name & sessionId are required' });
@@ -29,8 +29,9 @@ router.post('/', async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        messages,              // ARRAY field
-        message: messages[0],  // fallback for compatibility
+        // Store as variants[] in DB and keep legacy `message` for compatibility
+        variants: messages,
+        message: messages[0] || '',
         imageUrl: imageUrl || null,
         sessionId,
       },
@@ -70,7 +71,7 @@ router.get('/', async (_req: Request, res: Response) => {
       include: {
         buttons: true,
         session: true,
-        _count: { select: { messagesList: true } }, // FIXED — message logs count
+        _count: { select: { messages: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -97,8 +98,13 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     if (!campaign)
       return res.status(404).json({ success: false, message: 'Campaign not found' });
 
-    if (!Array.isArray(campaign.messages) || campaign.messages.length === 0)
-      return res.status(400).json({ success: false, message: 'Campaign has no messages[]' });
+    // Build message variants: use `variants` when present, otherwise fallback to legacy `message`
+    const variants: string[] = Array.isArray((campaign as any).variants) && (campaign as any).variants.length > 0
+      ? (campaign as any).variants as string[]
+      : (campaign?.message ? [campaign.message] : []);
+
+    if (!Array.isArray(variants) || variants.length === 0)
+      return res.status(400).json({ success: false, message: 'Campaign has no message variants' });
 
     const session = campaign.session;
 
@@ -151,9 +157,6 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     const btns = campaign.buttons.map((b) => ({ label: b.label, url: b.url }));
 
-    const pickRandom = (arr: string[]) =>
-      arr[Math.floor(Math.random() * arr.length)];
-
     // Push queue jobs
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
@@ -164,7 +167,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           campaignId: campaign.id,
           contactId: contact.id,
           phoneNumber: contact.phoneNumber,
-          messages: campaign.messages,       // ALL VARIANTS
+          messages: variants,       // ALL VARIANTS
           imageUrl: campaign.imageUrl,
           buttons: btns,
           sessionName: session.sessionId,

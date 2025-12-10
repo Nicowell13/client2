@@ -52,7 +52,7 @@ services:
       - WHATSAPP_START_SESSIONS=default
       
       # Engine (WEBJS recommended for stability, NOWEB for WAHA Plus features)
-      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
       
       # Webhook configuration
       - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
@@ -83,7 +83,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - WAHA_URL=http://waha:3000
       # Ensure backend uses the same API key as WAHA
-      - WAHA_API_KEY=${WAHA_API_KEY:-116e0222dfb5d86824e45ee9488d931b2b8924b63eb3766e1fb633ef3c934289}
+      - WAHA_API_KEY=${WAHA_API_KEY:-2b0f9b8281f541d0b25cf3b76d81615a}
       - PORT=4000
     depends_on:
       - postgres
