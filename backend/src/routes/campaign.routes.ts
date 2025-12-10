@@ -29,8 +29,7 @@ router.post('/', async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        // Store as variants[] in DB and keep legacy `message` for compatibility
-        variants: messages,
+        // Legacy schema: store the first message only
         message: messages[0] || '',
         imageUrl: imageUrl || null,
         sessionId,
@@ -71,7 +70,6 @@ router.get('/', async (_req: Request, res: Response) => {
       include: {
         buttons: true,
         session: true,
-        _count: { select: { messages: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -99,9 +97,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
 
     // Build message variants: use `variants` when present, otherwise fallback to legacy `message`
-    const variants: string[] = Array.isArray((campaign as any).variants) && (campaign as any).variants.length > 0
-      ? (campaign as any).variants as string[]
-      : (campaign?.message ? [campaign.message] : []);
+    const variants: string[] = campaign?.message ? [campaign.message] : [];
 
     if (!Array.isArray(variants) || variants.length === 0)
       return res.status(400).json({ success: false, message: 'Campaign has no message variants' });
