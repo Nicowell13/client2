@@ -14,9 +14,14 @@ router.use(authMiddleware);
 =========================================================== */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, message, imageUrl, sessionId, buttons } = req.body;
+    const { name, message, messages, imageUrl, sessionId, buttons } = req.body;
 
-    if (!name || !message || !sessionId) {
+    const finalMessage =
+      Array.isArray(messages) && messages.length > 0
+        ? String(messages[0])
+        : String(message || '');
+
+    if (!name || !finalMessage || !sessionId) {
       return res.status(400).json({
         success: false,
         message: 'Name, message and sessionId are required',
@@ -31,7 +36,7 @@ router.post('/', async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        message,
+        message: finalMessage,
         imageUrl: imageUrl || null,
         sessionId,
       },
