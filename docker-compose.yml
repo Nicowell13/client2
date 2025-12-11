@@ -82,6 +82,8 @@ services:
       - DATABASE_URL=postgresql://whatsapp_user:whatsapp_pass@postgres:5432/whatsapp_db
       - REDIS_URL=redis://redis:6379
       - WAHA_URL=http://waha:3000
+      - BACKEND_URL=https://api.watrix.online
+
       # Ensure backend uses the same API key as WAHA
       - WAHA_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
       - PORT=4000
