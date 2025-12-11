@@ -42,7 +42,7 @@ services:
       - WHATSAPP_API_HOSTNAME=0.0.0.0
       
       # Security - API Key untuk autentikasi
-      - WHATSAPP_API_KEY=${WAHA_API_KEY:-2b0f9b8281f541d0b25cf3b76d81615a}
+      - WHATSAPP_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
       
       # WAHA Plus License (required for waha-plus)
       - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
@@ -83,7 +83,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - WAHA_URL=http://waha:3000
       # Ensure backend uses the same API key as WAHA
-      - WAHA_API_KEY=${WAHA_API_KEY:-2b0f9b8281f541d0b25cf3b76d81615a}
+      - WAHA_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
       - PORT=4000
     depends_on:
       - postgres
