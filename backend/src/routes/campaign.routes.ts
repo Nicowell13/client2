@@ -70,7 +70,6 @@ router.get('/', async (_req: Request, res: Response) => {
       include: {
         buttons: true,
         session: true,
-        _count: { select: { messages: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
