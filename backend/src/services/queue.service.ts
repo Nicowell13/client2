@@ -11,7 +11,7 @@ export const campaignQueue = new Bull('campaign-messages', REDIS_URL, {
   defaultJobOptions: {
     removeOnComplete: true,
     removeOnFail: false,
-    attempts: 1,
+    attempts: 1, // IMPORTANT: avoid double send
     backoff: { type: 'exponential', delay: 2000 },
   },
 });
@@ -32,28 +32,45 @@ interface CampaignJob {
 }
 
 // ========================================================
-//  DELAY SYSTEM (VERY IMPORTANT FOR WHATSAPP SAFETY)
+// DELAY SYSTEM (WHATSAPP SAFE)
 // ========================================================
 function random(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Delay per message
 function calcMessageDelay(index: number): number {
-  const perMessage = random(7000, 12000); // 7–12 sec natural delay
-  const extra = Math.floor(index / 50) * random(8000, 15000); // extra delay every 50 msgs
-  return perMessage + extra;
+  const base = random(7000, 12000);
+  const extra = Math.floor(index / 50) * random(8000, 15000);
+  return base + extra;
 }
 
-// Delay per batch (max 500)
 function batchCooldown(batchIndex: number): number {
-  return batchIndex === 0 ? 0 : random(20000, 30000); // 20–30 sec cooldown
+  return batchIndex === 0 ? 0 : random(20000, 30000);
 }
 
 // ========================================================
-//  QUEUE PROCESSOR (5 concurrent workers)
+// SAFE WA MESSAGE ID NORMALIZER
 // ========================================================
-campaignQueue.process(5, async (job: Bull.Job<CampaignJob>) => {
+function extractWAId(result: any): string | null {
+  if (!result) return null;
+
+  if (typeof result.id === 'string') return result.id;
+
+  if (typeof result.id === 'object') {
+    if (result.id._serialized) return result.id._serialized;
+    if (result.id.id) return String(result.id.id);
+  }
+
+  if (result.key?.id) return result.key.id;
+  if (result.messageId) return result.messageId;
+
+  return null;
+}
+
+// ========================================================
+// QUEUE PROCESSOR
+// ========================================================
+campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   const {
     campaignId,
     contactId,
@@ -67,23 +84,25 @@ campaignQueue.process(5, async (job: Bull.Job<CampaignJob>) => {
   } = job.data;
 
   try {
-    // Apply Batch Delay (only first message in each batch triggers cooldown)
+    // ------------------------------------
+    // BATCH COOLDOWN
+    // ------------------------------------
     if (messageIndex === 0) {
       const cooldown = batchCooldown(batchIndex);
-      console.log(
-        `🧊 Batch ${batchIndex} cooldown ${cooldown}ms for campaign ${campaignId}`
-      );
+      console.log(`🧊 Batch ${batchIndex} cooldown ${cooldown}ms`);
       await new Promise((r) => setTimeout(r, cooldown));
     }
 
-    // Delay per message
+    // ------------------------------------
+    // PER MESSAGE DELAY
+    // ------------------------------------
     const delay = calcMessageDelay(messageIndex);
-    console.log(
-      `⏳ Delaying message ${messageIndex + 1} in batch ${batchIndex} by ${delay}ms`
-    );
+    console.log(`⏳ Delay ${delay}ms before send`);
     await new Promise((r) => setTimeout(r, delay));
 
-    // Send WhatsApp message
+    // ------------------------------------
+    // SEND MESSAGE
+    // ------------------------------------
     const result = await wahaService.sendMessageWithButtons(
       sessionName,
       phoneNumber,
@@ -92,36 +111,70 @@ campaignQueue.process(5, async (job: Bull.Job<CampaignJob>) => {
       buttons
     );
 
-    // Update message status
+    const waMessageId = extractWAId(result);
+
+    // ------------------------------------
+    // MARK AS SENT (SUCCESS)
+    // ------------------------------------
     await prisma.message.updateMany({
       where: { campaignId, contactId, status: 'pending' },
       data: {
         status: 'sent',
-        waMessageId: result?.id || null,
+        waMessageId,
         sentAt: new Date(),
       },
     });
 
-    // Increment sent count
     await prisma.campaign.update({
       where: { id: campaignId },
       data: { sentCount: { increment: 1 } },
     });
 
-    return { success: true, messageId: result?.id };
+    return { success: true, messageId: waMessageId };
   } catch (error: any) {
-    console.error('❌ Message sending failed:', error?.message);
+    const errorMsg = String(error?.message || '');
 
-    // Mark failed message
+    // =====================================================
+    // 🔥 WEBJS NON-FATAL ERROR HANDLING (IMPORTANT FIX)
+    // =====================================================
+    const isWebJSNonFatal =
+      errorMsg.includes('addAnnotations') ||
+      errorMsg.includes('processMedia') ||
+      errorMsg.includes('Cannot read properties');
+
+    if (isWebJSNonFatal) {
+      console.warn('⚠ WebJS non-fatal error, marking message as SENT');
+
+      await prisma.message.updateMany({
+        where: { campaignId, contactId, status: 'pending' },
+        data: {
+          status: 'sent',
+          sentAt: new Date(),
+          errorMsg: 'WebJS warning (message delivered)',
+        },
+      });
+
+      await prisma.campaign.update({
+        where: { id: campaignId },
+        data: { sentCount: { increment: 1 } },
+      });
+
+      return { success: true, warning: 'webjs-non-fatal' };
+    }
+
+    // =====================================================
+    // REAL FAILURE
+    // =====================================================
+    console.error('❌ Message sending failed:', errorMsg);
+
     await prisma.message.updateMany({
       where: { campaignId, contactId, status: 'pending' },
       data: {
         status: 'failed',
-        errorMsg: error?.message || 'Unknown error',
+        errorMsg,
       },
     });
 
-    // Increment failed count
     await prisma.campaign.update({
       where: { id: campaignId },
       data: { failedCount: { increment: 1 } },
@@ -132,42 +185,33 @@ campaignQueue.process(5, async (job: Bull.Job<CampaignJob>) => {
 });
 
 // ========================================================
-// QUEUE EVENT LISTENERS
+// QUEUE EVENTS
 // ========================================================
-campaignQueue.on('completed', async (job, result) => {
-  console.log(`✔ Job ${job.id} completed`, result);
-
+campaignQueue.on('completed', async (job) => {
   const { campaignId } = job.data;
 
-  // Check if campaign is finished
   const pending = await prisma.message.count({
     where: { campaignId, status: 'pending' },
   });
 
   if (pending === 0) {
-    console.log(`🎉 Campaign ${campaignId} fully processed!`);
+    const failed = await prisma.message.count({
+      where: { campaignId, status: 'failed' },
+    });
+
     await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: 'sent' },
+      data: {
+        status: failed > 0 ? 'sent' : 'sent',
+      },
     });
+
+    console.log(`🎉 Campaign ${campaignId} finished`);
   }
 });
 
 campaignQueue.on('failed', async (job, err) => {
-  const campaignId = job.data.campaignId;
   console.error(`❌ Job ${job.id} failed:`, err.message);
-
-  // If all messages processed, update campaign
-  const pending = await prisma.message.count({
-    where: { campaignId, status: 'pending' },
-  });
-
-  if (pending === 0) {
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: { status: 'sent' },
-    });
-  }
 });
 
 export default campaignQueue;

@@ -60,7 +60,7 @@ model Contact {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  messagesList Message[] @relation("ContactMessages")
+  messages    Message[] @relation("ContactMessages")
 
   @@unique([phoneNumber])
   @@map("contacts")
@@ -77,7 +77,7 @@ model Campaign {
   message       String     @db.Text
 
   // multi-variant messages
-  messages      String[]   @default([])
+  variants      String[]   @default([])
 
   imageUrl      String?
   status        String      @default("draft") // draft, sending, sent, failed
@@ -98,7 +98,7 @@ model Campaign {
   buttons       Button[]
 
   // relation ke Message logs
-  messagesList  Message[]   @relation("CampaignMessages")
+  messages      Message[]   @relation("CampaignMessages")
 
   @@map("campaigns")
 }

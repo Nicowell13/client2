@@ -16,10 +16,15 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { name, message, messages, imageUrl, sessionId, buttons } = req.body;
 
-    const finalMessage =
-      Array.isArray(messages) && messages.length > 0
-        ? String(messages[0])
-        : String(message || '');
+    const cleanedMessages: string[] = Array.isArray(messages)
+      ? messages
+          .map((m: any) => String(m ?? '').trim())
+          .filter((m: string) => m.length > 0)
+      : [];
+
+    const legacyMessage = String(message ?? '').trim();
+
+    const finalMessage = cleanedMessages.length > 0 ? cleanedMessages[0] : legacyMessage;
 
     if (!name || !finalMessage || !sessionId) {
       return res.status(400).json({
@@ -36,7 +41,9 @@ router.post('/', async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.create({
       data: {
         name,
+        // Persist multi-variant messages, but keep `message` as required fallback
         message: finalMessage,
+        variants: cleanedMessages,
         imageUrl: imageUrl || null,
         sessionId,
       },
@@ -104,6 +111,14 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     if (!campaign) {
       return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const variants: string[] = Array.isArray((campaign as any).variants) && (campaign as any).variants.length > 0
+      ? ((campaign as any).variants as string[]).map((m) => String(m ?? '').trim()).filter((m) => m.length > 0)
+      : [String(campaign.message ?? '').trim()].filter((m) => m.length > 0);
+
+    if (variants.length === 0) {
+      return res.status(400).json({ success: false, message: 'Campaign message is empty' });
     }
 
     const session = campaign.session;
@@ -195,11 +210,15 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       for (let i = 0; i < batch.length; i++) {
         const c = batch[i];
 
+        // Sequential variant selection across all contacts with wrap-around
+        const globalIndex = b * BATCH_SIZE + i;
+        const selectedMessage = variants[globalIndex % variants.length];
+
         await campaignQueue.add({
           campaignId: campaign.id,
           contactId: c.id,
           phoneNumber: c.phoneNumber,
-          message: campaign.message,
+          message: selectedMessage,
           imageUrl: campaign.imageUrl,
           buttons: btns,
           sessionName: campaign.session.sessionId, // WAHA SESSION NAME
