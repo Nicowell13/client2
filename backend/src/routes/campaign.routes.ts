@@ -97,6 +97,35 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 /* ===========================================================
+   GET ALL MESSAGE LOGS (FOR MESSAGES PAGE)
+=========================================================== */
+router.get('/messages/all', async (_req: Request, res: Response) => {
+  try {
+    const messages = await prisma.message.findMany({
+      include: {
+        contact: {
+          select: {
+            name: true,
+            phoneNumber: true,
+          },
+        },
+        campaign: {
+          select: {
+            name: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json({ success: true, data: messages });
+  } catch (error: any) {
+    console.error('[MESSAGES][LIST]', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ===========================================================
    SEND CAMPAIGN (WITH AUTO BATCH 500)
 =========================================================== */
 router.post('/:id/send', async (req: Request, res: Response) => {
