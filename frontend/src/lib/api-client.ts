@@ -91,6 +91,9 @@ export const contactAPI = {
 
   create: (data: any) => api.post('/api/contacts', data),
 
+  bulkDelete: (payload: { ids?: string[]; all?: boolean }) =>
+    api.post('/api/contacts/bulk-delete', payload),
+
   delete: (contactId: string) => api.delete(`/api/contacts/${contactId}`),
 };
 

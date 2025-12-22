@@ -39,13 +39,13 @@ function random(min: number, max: number) {
 }
 
 function calcMessageDelay(index: number): number {
-  const base = random(7000, 12000);
-  const extra = Math.floor(index / 50) * random(8000, 15000);
+  const base = random(12000, 20000);
+  const extra = Math.floor(index / 5) * random(16000, 30000);
   return base + extra;
 }
 
 function batchCooldown(batchIndex: number): number {
-  return batchIndex === 0 ? 0 : random(20000, 30000);
+  return batchIndex === 0 ? 0 : random(30000, 45000);
 }
 
 // ========================================================

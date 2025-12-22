@@ -34,6 +34,7 @@ export default function ContactsPage() {
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
   const [pagination, setPagination] = useState<ContactsPagination | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -48,8 +49,28 @@ export default function ContactsPage() {
     const token = localStorage.getItem('token');
     if (!token) return;
     fetchContacts(page);
+    setSelectedIds(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  const isAllSelectedOnPage = contacts.length > 0 && selectedIds.size === contacts.length;
+
+  const toggleSelectAllOnPage = () => {
+    setSelectedIds((prev) => {
+      if (contacts.length === 0) return new Set();
+      if (prev.size === contacts.length) return new Set();
+      return new Set(contacts.map((c) => c.id));
+    });
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const fetchContacts = async (targetPage: number) => {
     try {
@@ -118,17 +139,67 @@ export default function ContactsPage() {
     }
   };
 
+  const bulkDeleteSelected = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const ok = confirm(`Delete ${ids.length} selected contact(s)?`);
+    if (!ok) return;
+
+    try {
+      const resp = await contactAPI.bulkDelete({ ids });
+      toast.success(resp.data?.message || 'Contacts deleted');
+      setSelectedIds(new Set());
+      setPage(1);
+      fetchContacts(1);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to delete contacts');
+    }
+  };
+
+  const bulkDeleteAll = async () => {
+    const ok = confirm('Delete ALL contacts? This cannot be undone.');
+    if (!ok) return;
+
+    try {
+      const resp = await contactAPI.bulkDelete({ all: true });
+      toast.success(resp.data?.message || 'All contacts deleted');
+      setSelectedIds(new Set());
+      setPage(1);
+      fetchContacts(1);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to delete all contacts');
+    }
+  };
+
   return (
     <DashboardLayout title="Contacts" description="Manage your contact list">
       <div>
         <div className="flex items-center justify-between mb-8">
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
-          >
-            <Plus className="w-5 h-5" />
-            Add Contact
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+            >
+              <Plus className="w-5 h-5" />
+              Add Contact
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={bulkDeleteSelected}
+              disabled={selectedIds.size === 0}
+              className="px-4 py-2 rounded-lg border border-red-600 text-red-600 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-50"
+            >
+              Delete Selected ({selectedIds.size})
+            </button>
+            <button
+              onClick={bulkDeleteAll}
+              className="px-4 py-2 rounded-lg border border-red-600 text-red-600 text-sm hover:bg-red-50"
+            >
+              Delete All
+            </button>
+          </div>
         </div>
 
         {/* Upload CSV */}
@@ -229,6 +300,14 @@ export default function ContactsPage() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      <input
+                        type="checkbox"
+                        checked={isAllSelectedOnPage}
+                        onChange={toggleSelectAllOnPage}
+                        aria-label="Select all contacts on this page"
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
@@ -239,6 +318,14 @@ export default function ContactsPage() {
                 <tbody className="divide-y divide-gray-200">
                   {contacts.map((contact) => (
                     <tr key={contact.id}>
+                      <td className="px-6 py-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(contact.id)}
+                          onChange={() => toggleSelected(contact.id)}
+                          aria-label={`Select ${contact.name}`}
+                        />
+                      </td>
                       <td className="px-6 py-4">{contact.name}</td>
                       <td className="px-6 py-4">{contact.phoneNumber}</td>
                       <td className="px-6 py-4">{contact.email || '-'}</td>

@@ -112,6 +112,44 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// Bulk delete contacts (selected or all)
+router.post('/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const { ids, all } = req.body as { ids?: string[]; all?: boolean };
+
+    if (all === true) {
+      const result = await prisma.contact.deleteMany({});
+      return res.json({
+        success: true,
+        message: `${result.count} contacts deleted successfully`,
+        data: { deleted: result.count },
+      });
+    }
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide contact ids to delete',
+      });
+    }
+
+    const result = await prisma.contact.deleteMany({
+      where: { id: { in: ids } },
+    });
+
+    return res.json({
+      success: true,
+      message: `${result.count} contacts deleted successfully`,
+      data: { deleted: result.count },
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // Create contact manually
 router.post('/', async (req: Request, res: Response) => {
   try {
