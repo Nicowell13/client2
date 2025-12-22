@@ -67,6 +67,23 @@ function extractWAId(result: any): string | null {
   return null;
 }
 
+async function safeCampaignUpdate(
+  campaignId: string,
+  data: Parameters<typeof prisma.campaign.updateMany>[0]['data']
+) {
+  const result = await prisma.campaign.updateMany({
+    where: { id: campaignId },
+    data,
+  });
+
+  if (result.count === 0) {
+    console.warn(`⚠ Campaign ${campaignId} not found (skipping update)`);
+    return false;
+  }
+
+  return true;
+}
+
 // ========================================================
 // QUEUE PROCESSOR
 // ========================================================
@@ -84,6 +101,19 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
   } = job.data;
 
   try {
+    // ------------------------------------
+    // SKIP IF CAMPAIGN DELETED
+    // ------------------------------------
+    const existingCampaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { id: true },
+    });
+
+    if (!existingCampaign) {
+      console.warn(`⚠ Campaign ${campaignId} missing; skipping job send`);
+      return { success: false, skipped: true, reason: 'campaign-missing' };
+    }
+
     // ------------------------------------
     // BATCH COOLDOWN
     // ------------------------------------
@@ -125,10 +155,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       },
     });
 
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: { sentCount: { increment: 1 } },
-    });
+    await safeCampaignUpdate(campaignId, { sentCount: { increment: 1 } });
 
     return { success: true, messageId: waMessageId };
   } catch (error: any) {
@@ -154,10 +181,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
         },
       });
 
-      await prisma.campaign.update({
-        where: { id: campaignId },
-        data: { sentCount: { increment: 1 } },
-      });
+      await safeCampaignUpdate(campaignId, { sentCount: { increment: 1 } });
 
       return { success: true, warning: 'webjs-non-fatal' };
     }
@@ -175,10 +199,7 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
       },
     });
 
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: { failedCount: { increment: 1 } },
-    });
+    await safeCampaignUpdate(campaignId, { failedCount: { increment: 1 } });
 
     throw error;
   }
@@ -199,11 +220,8 @@ campaignQueue.on('completed', async (job) => {
       where: { campaignId, status: 'failed' },
     });
 
-    await prisma.campaign.update({
-      where: { id: campaignId },
-      data: {
-        status: failed > 0 ? 'sent' : 'sent',
-      },
+    await safeCampaignUpdate(campaignId, {
+      status: failed > 0 ? 'sent' : 'sent',
     });
 
     console.log(`🎉 Campaign ${campaignId} finished`);
