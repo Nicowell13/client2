@@ -78,7 +78,8 @@ export const sessionAPI = {
 // CONTACT API
 // =========================
 export const contactAPI = {
-  getAll: () => api.get('/api/contacts'),
+  getAll: (params?: { page?: number; limit?: number; search?: string }) =>
+    api.get('/api/contacts', { params }),
 
   uploadCSV: (file: File) => {
     const formData = new FormData();

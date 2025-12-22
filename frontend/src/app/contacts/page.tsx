@@ -17,6 +17,13 @@ interface Contact {
   createdAt: string;
 }
 
+interface ContactsPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 export default function ContactsPage() {
   const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -24,6 +31,9 @@ export default function ContactsPage() {
   const [uploading, setUploading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', phoneNumber: '', email: '' });
+  const [page, setPage] = useState(1);
+  const [limit] = useState(50);
+  const [pagination, setPagination] = useState<ContactsPagination | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -31,14 +41,27 @@ export default function ContactsPage() {
       router.push('/login');
       return;
     }
-    fetchContacts();
+    fetchContacts(1);
   }, []);
 
-  const fetchContacts = async () => {
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetchContacts(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  const fetchContacts = async (targetPage: number) => {
     try {
-      const resp = await contactAPI.getAll();
-      const data = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+      const resp = await contactAPI.getAll({ page: targetPage, limit });
+      const payload = resp.data;
+      const data = Array.isArray(payload) ? payload : payload?.data || [];
       setContacts(data);
+      if (payload?.pagination) {
+        setPagination(payload.pagination);
+      } else {
+        setPagination(null);
+      }
     } catch (error: any) {
       toast.error(error?.response?.data?.message || 'Failed to load contacts');
     } finally {
@@ -57,7 +80,7 @@ export default function ContactsPage() {
     try {
       const { data } = await contactAPI.uploadCSV(file);
       toast.success(data?.message || 'Contacts uploaded');
-      fetchContacts();
+      fetchContacts(page);
     } catch (error) {
       toast.error('Failed to upload contacts');
     } finally {
@@ -78,7 +101,7 @@ export default function ContactsPage() {
       toast.success('Contact added successfully');
       setNewContact({ name: '', phoneNumber: '', email: '' });
       setShowAddForm(false);
-      fetchContacts();
+      fetchContacts(page);
     } catch (error) {
       toast.error('Failed to add contact');
     }
@@ -89,7 +112,7 @@ export default function ContactsPage() {
     try {
       await contactAPI.delete(id);
       toast.success('Contact deleted');
-      fetchContacts();
+      fetchContacts(page);
     } catch (error) {
       toast.error('Failed to delete contact');
     }
@@ -189,7 +212,9 @@ export default function ContactsPage() {
         {/* Contacts List */}
         <div className="bg-white rounded-lg shadow">
           <div className="p-6 border-b">
-            <h2 className="text-xl font-semibold">All Contacts ({contacts.length})</h2>
+            <h2 className="text-xl font-semibold">
+              All Contacts ({pagination?.total ?? contacts.length})
+            </h2>
           </div>
           {loading ? (
             <div className="text-center py-12">
@@ -232,6 +257,31 @@ export default function ContactsPage() {
                   ))}
                 </tbody>
               </table>
+
+              {/* Pagination */}
+              {pagination && pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between px-6 py-4 border-t bg-white">
+                  <div className="text-sm text-gray-600">
+                    Page {pagination.page} of {pagination.totalPages}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={pagination.page <= 1}
+                      className="px-3 py-2 rounded-lg border text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                      disabled={pagination.page >= pagination.totalPages}
+                      className="px-3 py-2 rounded-lg border text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
