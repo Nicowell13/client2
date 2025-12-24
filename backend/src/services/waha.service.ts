@@ -18,13 +18,16 @@ class WahaService {
   private client: AxiosInstance;
   private baseUrl: string;
   private apiKey: string;
+  private readonly requestTimeoutMs: number;
 
   constructor() {
     this.baseUrl = process.env.WAHA_URL || 'http://localhost:3000';
     this.apiKey = process.env.WAHA_API_KEY || '';
+    this.requestTimeoutMs = Number(process.env.WAHA_TIMEOUT_MS || 60000);
 
     this.client = axios.create({
       baseURL: this.baseUrl,
+      timeout: this.requestTimeoutMs,
       headers: {
         'Content-Type': 'application/json',
         ...(this.apiKey && { 'X-Api-Key': this.apiKey }),
@@ -32,7 +35,24 @@ class WahaService {
       },
     });
 
-    console.log('[WAHA] Base URL:', this.baseUrl, '| API key set:', !!this.apiKey);
+    console.log(
+      '[WAHA] Base URL:',
+      this.baseUrl,
+      '| API key set:',
+      !!this.apiKey,
+      '| timeout(ms):',
+      this.requestTimeoutMs
+    );
+  }
+
+  private formatAxiosError(error: any): string {
+    if (error?.code === 'ECONNABORTED') return `WAHA request timeout after ${this.requestTimeoutMs}ms`;
+    if (error?.response?.status) {
+      const status = error.response.status;
+      const data = typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data);
+      return `WAHA HTTP ${status}: ${data}`;
+    }
+    return String(error?.message || 'Unknown error');
   }
 
   // ===== Session Management =====
@@ -215,8 +235,9 @@ class WahaService {
       });
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA] Failed to send text message:', error?.response?.data || error?.message);
-      throw new Error(`Failed to send text message: ${error?.message || 'Unknown error'}`);
+      const msg = this.formatAxiosError(error);
+      console.error('[WAHA] Failed to send text message:', msg);
+      throw new Error(`Failed to send text message: ${msg}`);
     }
   }
 
@@ -237,8 +258,9 @@ class WahaService {
       });
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA] Failed to send image message:', error?.response?.data || error?.message);
-      throw new Error(`Failed to send image message: ${error?.message || 'Unknown error'}`);
+      const msg = this.formatAxiosError(error);
+      console.error('[WAHA] Failed to send image message:', msg);
+      throw new Error(`Failed to send image message: ${msg}`);
     }
   }
 
@@ -265,8 +287,9 @@ class WahaService {
       const response = await this.client.post('/api/sendButtons', payload);
       return response.data;
     } catch (error: any) {
-      console.error('[WAHA] Failed to send button message:', error?.response?.data || error?.message);
-      throw new Error(`Failed to send button message: ${error?.message || 'Unknown error'}`);
+      const msg = this.formatAxiosError(error);
+      console.error('[WAHA] Failed to send button message:', msg);
+      throw new Error(`Failed to send button message: ${msg}`);
     }
   }
 
@@ -291,8 +314,9 @@ class WahaService {
 
       return await this.sendTextMessage(sessionName, phoneNumber, fullMessage);
     } catch (error: any) {
-      console.error('[WAHA] Failed to send message with buttons:', error?.response?.data || error?.message);
-      throw new Error(`Failed to send message with buttons: ${error?.message || 'Unknown error'}`);
+      const msg = this.formatAxiosError(error);
+      console.error('[WAHA] Failed to send message with buttons:', msg);
+      throw new Error(`Failed to send message with buttons: ${msg}`);
     }
   }
 }

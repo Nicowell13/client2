@@ -39,9 +39,19 @@ function random(min: number, max: number) {
 }
 
 function calcMessageDelay(index: number): number {
+  // NOTE: previously this used step-based growth (every 5 messages) which can
+  // create multi-minute pauses around index ~20+ and looks like the system is stuck.
+  // Keep WhatsApp-safe jitter but cap delay to avoid long silent gaps.
   const base = random(12000, 20000);
-  const extra = Math.floor(index / 5) * random(16000, 30000);
-  return base + extra;
+
+  // gradual backoff: grows slowly with index, capped
+  const gradual = Math.min(index * random(250, 600), 15000);
+
+  // occasional cooldown to be safe (every 10 messages), capped
+  const periodic = index > 0 && index % 10 === 0 ? random(20000, 40000) : 0;
+
+  const delay = base + gradual + periodic;
+  return Math.min(delay, 60000);
 }
 
 function batchCooldown(batchIndex: number): number {
@@ -230,6 +240,10 @@ campaignQueue.on('completed', async (job) => {
 
 campaignQueue.on('failed', async (job, err) => {
   console.error(`❌ Job ${job.id} failed:`, err.message);
+});
+
+campaignQueue.on('stalled', (job) => {
+  console.warn(`⚠ Job ${job.id} stalled (possible WAHA/network hang)`);
 });
 
 export default campaignQueue;
