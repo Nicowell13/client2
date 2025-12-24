@@ -81,13 +81,27 @@ class WahaService {
 
   async stopSession(sessionName: string = 'default') {
     try {
-      const response = await this.client.post('/api/sessions/stop', {
-        name: sessionName,
-      });
-      return response.data;
+      // WAHA variants differ by version; try a couple of common routes.
+      const candidates: Array<() => Promise<any>> = [
+        () => this.client.post('/api/sessions/stop', { name: sessionName }, { validateStatus: () => true }),
+        () => this.client.post(`/api/sessions/${encodeURIComponent(sessionName)}/stop`, {}, { validateStatus: () => true }),
+      ];
+
+      let last: any = null;
+      for (const call of candidates) {
+        const resp = await call();
+        last = resp;
+        if (resp.status >= 200 && resp.status < 300) return resp.data;
+      }
+
+      throw new Error(
+        `WAHA stop failed (status ${last?.status ?? 'unknown'}): ${
+          typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
+        }`
+      );
     } catch (error: any) {
       console.error('[WAHA] Failed to stop session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to stop session: ${error?.message || 'Unknown error'}`);
+      throw new Error(`Failed to stop session: ${this.formatAxiosError(error)}`);
     }
   }
 
@@ -106,15 +120,14 @@ class WahaService {
         if (resp.status >= 200 && resp.status < 300) return resp.data;
       }
 
-      console.warn('[WAHA] Logout returned non-2xx (all candidates)', {
-        sessionName,
-        status: last?.status,
-        data: last?.data,
-      });
-      return last?.data;
+      throw new Error(
+        `WAHA logout failed (status ${last?.status ?? 'unknown'}): ${
+          typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
+        }`
+      );
     } catch (error: any) {
       console.error('[WAHA] Failed to logout session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to logout session: ${error?.message || 'Unknown error'}`);
+      throw new Error(`Failed to logout session: ${this.formatAxiosError(error)}`);
     }
   }
 
@@ -134,15 +147,14 @@ class WahaService {
         if (resp.status >= 200 && resp.status < 300) return resp.data;
       }
 
-      console.warn('[WAHA] Delete returned non-2xx (all candidates)', {
-        sessionName,
-        status: last?.status,
-        data: last?.data,
-      });
-      return last?.data;
+      throw new Error(
+        `WAHA delete failed (status ${last?.status ?? 'unknown'}): ${
+          typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
+        }`
+      );
     } catch (error: any) {
       console.error('[WAHA] Failed to delete session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to delete session: ${error?.message || 'Unknown error'}`);
+      throw new Error(`Failed to delete session: ${this.formatAxiosError(error)}`);
     }
   }
 

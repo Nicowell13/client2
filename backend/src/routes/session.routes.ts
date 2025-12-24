@@ -290,7 +290,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Session not found' });
     }
 
-    // Best-effort cleanup in WAHA to avoid leaving residue that can affect next sessions
+    // Cleanup in WAHA to avoid leaving residue that can affect next sessions
     try {
       await wahaService.stopSession(session.sessionId);
     } catch (e: any) {
@@ -306,7 +306,11 @@ router.delete('/:id', async (req: Request, res: Response) => {
     try {
       await wahaService.deleteSession(session.sessionId);
     } catch (e: any) {
-      console.warn('[SESSION][DELETE] WAHA delete failed (continuing):', e?.message || e);
+      console.error('[SESSION][DELETE] WAHA delete failed (aborting DB delete):', e?.message || e);
+      return res.status(502).json({
+        success: false,
+        message: `Failed to delete session in WAHA: ${e?.message || 'Unknown error'}`,
+      });
     }
 
     await prisma.session.delete({

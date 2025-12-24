@@ -232,8 +232,9 @@ export default function SessionsPage() {
       await sessionAPI.stop(sessionId);
       toast.success('Session stopped');
       fetchSessions();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to stop session:', error);
+      toast.error(error?.response?.data?.message || 'Failed to stop session');
     }
   };
 
@@ -244,8 +245,9 @@ export default function SessionsPage() {
       await sessionAPI.delete(sessionId);
       toast.success('Session deleted');
       fetchSessions();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to delete session:', error);
+      toast.error(error?.response?.data?.message || 'Failed to delete session');
     }
   };
 
