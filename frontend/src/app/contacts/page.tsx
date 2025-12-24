@@ -91,15 +91,12 @@ export default function ContactsPage() {
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
+    const files = acceptedFiles || [];
+    if (files.length === 0) return;
 
     setUploading(true);
     try {
-      const { data } = await contactAPI.uploadCSV(file);
+      const { data } = await contactAPI.uploadCSV(files);
       toast.success(data?.message || 'Contacts uploaded');
       fetchContacts(page);
     } catch (error) {
@@ -112,7 +109,8 @@ export default function ContactsPage() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { 'text/csv': ['.csv'] },
-    maxFiles: 1,
+    multiple: true,
+    maxFiles: 20,
   });
 
   const addContact = async (e: React.FormEvent) => {
@@ -216,10 +214,10 @@ export default function ContactsPage() {
             {uploading ? (
               <p className="text-gray-600">Uploading...</p>
             ) : isDragActive ? (
-              <p className="text-gray-600">Drop the CSV file here...</p>
+              <p className="text-gray-600">Drop the CSV file(s) here...</p>
             ) : (
               <div>
-                <p className="text-gray-600 mb-2">Drag & drop a CSV file here, or click to select</p>
+                <p className="text-gray-600 mb-2">Drag & drop CSV file(s) here, or click to select</p>
                 <p className="text-sm text-gray-500">Format: name, phoneNumber, email (optional)</p>
               </div>
             )}

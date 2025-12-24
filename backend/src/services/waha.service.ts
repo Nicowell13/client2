@@ -91,6 +91,61 @@ class WahaService {
     }
   }
 
+  async logoutSession(sessionName: string = 'default') {
+    try {
+      // WAHA variants differ by version; try a couple of common routes.
+      const candidates: Array<() => Promise<any>> = [
+        () => this.client.post('/api/sessions/logout', { name: sessionName }, { validateStatus: () => true }),
+        () => this.client.post(`/api/sessions/${encodeURIComponent(sessionName)}/logout`, {}, { validateStatus: () => true }),
+      ];
+
+      let last: any = null;
+      for (const call of candidates) {
+        const resp = await call();
+        last = resp;
+        if (resp.status >= 200 && resp.status < 300) return resp.data;
+      }
+
+      console.warn('[WAHA] Logout returned non-2xx (all candidates)', {
+        sessionName,
+        status: last?.status,
+        data: last?.data,
+      });
+      return last?.data;
+    } catch (error: any) {
+      console.error('[WAHA] Failed to logout session:', error?.response?.data || error?.message);
+      throw new Error(`Failed to logout session: ${error?.message || 'Unknown error'}`);
+    }
+  }
+
+  async deleteSession(sessionName: string = 'default') {
+    try {
+      // Confirmed by user curl: DELETE /api/sessions/:name
+      // Keep a fallback for older variants.
+      const candidates: Array<() => Promise<any>> = [
+        () => this.client.delete(`/api/sessions/${encodeURIComponent(sessionName)}`, { validateStatus: () => true }),
+        () => this.client.post('/api/sessions/delete', { name: sessionName }, { validateStatus: () => true }),
+      ];
+
+      let last: any = null;
+      for (const call of candidates) {
+        const resp = await call();
+        last = resp;
+        if (resp.status >= 200 && resp.status < 300) return resp.data;
+      }
+
+      console.warn('[WAHA] Delete returned non-2xx (all candidates)', {
+        sessionName,
+        status: last?.status,
+        data: last?.data,
+      });
+      return last?.data;
+    } catch (error: any) {
+      console.error('[WAHA] Failed to delete session:', error?.response?.data || error?.message);
+      throw new Error(`Failed to delete session: ${error?.message || 'Unknown error'}`);
+    }
+  }
+
   async getQRCode(sessionName: string = 'default'): Promise<QRResponse> {
     try {
       // 1. JSON (base64)

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Sidebar from '@/components/Sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { campaignAPI, contactAPI, sessionAPI } from '@/lib/api-client';
 import { 
   Users, 
   MessageSquare, 
@@ -53,32 +54,49 @@ export default function Home() {
 
   const fetchStats = async () => {
     try {
-      const token = localStorage.getItem('token');
-      
-      // Fetch contacts count
-      const contactsRes = await fetch('http://localhost:4000/api/contacts', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const contacts = await contactsRes.json();
+      // Contacts: use pagination.total to avoid fetching everything
+      const contactsResp = await contactAPI.getAll({ page: 1, limit: 1 });
+      const contactsPayload = contactsResp.data;
+      const totalContacts =
+        Number(contactsPayload?.pagination?.total) ||
+        (Array.isArray(contactsPayload?.data) ? contactsPayload.data.length : 0);
 
-      // Fetch campaigns count
-      const campaignsRes = await fetch('http://localhost:4000/api/campaigns', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const campaigns = await campaignsRes.json();
+      const campaignsResp = await campaignAPI.getAll();
+      const campaignsPayload = campaignsResp.data;
+      const campaignsList = Array.isArray(campaignsPayload)
+        ? campaignsPayload
+        : Array.isArray(campaignsPayload?.data)
+          ? campaignsPayload.data
+          : [];
 
-      // Fetch sessions count
-      const sessionsRes = await fetch('http://localhost:4000/api/sessions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const sessions = await sessionsRes.json();
+      const sessionsResp = await sessionAPI.getAll();
+      const sessionsPayload = sessionsResp.data;
+      const sessionsList = Array.isArray(sessionsPayload)
+        ? sessionsPayload
+        : Array.isArray(sessionsPayload?.data)
+          ? sessionsPayload.data
+          : [];
+
+      const connectedStatuses = new Set(['working', 'ready', 'authenticated']);
+      const activeSessions = sessionsList.filter((s: any) =>
+        connectedStatuses.has(String(s?.status || '').toLowerCase())
+      ).length;
+
+      const sentMessages = campaignsList.reduce(
+        (sum: number, c: any) => sum + Number(c?.sentCount || 0),
+        0
+      );
+      const failedMessages = campaignsList.reduce(
+        (sum: number, c: any) => sum + Number(c?.failedCount || 0),
+        0
+      );
 
       setStats({
-        totalContacts: contacts.length || 0,
-        totalCampaigns: campaigns.length || 0,
-        sentMessages: campaigns.reduce((sum: number, c: any) => sum + (c.sentCount || 0), 0),
-        failedMessages: campaigns.reduce((sum: number, c: any) => sum + (c.failedCount || 0), 0),
-        activeSessions: sessions.filter((s: any) => s.status === 'working').length || 0,
+        totalContacts,
+        totalCampaigns: campaignsList.length,
+        sentMessages,
+        failedMessages,
+        activeSessions,
       });
     } catch (error) {
       console.error('Failed to fetch stats:', error);

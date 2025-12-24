@@ -59,12 +59,18 @@ export default function SessionsPage() {
       }
       setPairingCode(null);
       setPhoneInput('');
+      setShowPairingUI(false);
     }
     return () => {
       if (qrWaitTimer) clearTimeout(qrWaitTimer);
       if (statusPollTimer) clearInterval(statusPollTimer);
     };
   }, [showQRModal]);
+
+  const isConnectedStatus = (status: string | undefined | null) => {
+    const normalized = String(status || '').toLowerCase();
+    return ['working', 'ready', 'authenticated'].includes(normalized);
+  };
 
   const checkAuth = () => {
     const token = localStorage.getItem('token');
@@ -125,6 +131,8 @@ export default function SessionsPage() {
   };
 
   const handleShowQR = async (session: Session) => {
+    setShowPairingUI(false);
+
     // If we already have a QR stored (from webhook), use it immediately
     if (session.qrCode) {
       setSelectedSession(session);
@@ -158,13 +166,16 @@ export default function SessionsPage() {
       try {
         const resp = await sessionAPI.getAll();
         const list = Array.isArray(resp.data) ? resp.data : resp.data?.data || [];
+        setSessions(list);
         const updated = list.find((s: any) => s.id === session.id);
-        if (updated?.status === 'working') {
+        if (isConnectedStatus(updated?.status)) {
           toast.success('Connected');
           setSelectedSession(updated);
           setShowQRModal(false);
+          setShowPairingUI(false);
           clearInterval(poll);
           setStatusPollTimer(null);
+          fetchSessions();
         }
       } catch (e) {}
     }, 3000);
@@ -241,6 +252,8 @@ export default function SessionsPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'working':
+      case 'ready':
+      case 'authenticated':
         return <Badge variant="success">Connected</Badge>;
       case 'starting':
         return <Badge variant="warning">Starting</Badge>;
@@ -254,6 +267,8 @@ export default function SessionsPage() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'working':
+      case 'ready':
+      case 'authenticated':
         return <CheckCircle className="w-5 h-5 text-green-600" />;
       case 'starting':
         return <Clock className="w-5 h-5 text-yellow-600" />;

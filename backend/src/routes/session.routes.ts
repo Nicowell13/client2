@@ -285,6 +285,30 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
+    const session = await prisma.session.findUnique({ where: { id } });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    // Best-effort cleanup in WAHA to avoid leaving residue that can affect next sessions
+    try {
+      await wahaService.stopSession(session.sessionId);
+    } catch (e: any) {
+      console.warn('[SESSION][DELETE] WAHA stop failed (continuing):', e?.message || e);
+    }
+
+    try {
+      await wahaService.logoutSession(session.sessionId);
+    } catch (e: any) {
+      console.warn('[SESSION][DELETE] WAHA logout failed (continuing):', e?.message || e);
+    }
+
+    try {
+      await wahaService.deleteSession(session.sessionId);
+    } catch (e: any) {
+      console.warn('[SESSION][DELETE] WAHA delete failed (continuing):', e?.message || e);
+    }
+
     await prisma.session.delete({
       where: { id },
     });

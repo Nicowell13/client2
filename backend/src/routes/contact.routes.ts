@@ -11,56 +11,78 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Protect all contact routes
 router.use(authMiddleware);
 
-// Upload CSV contacts
-router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
+function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumber: string; email: string | null }>> {
+  return new Promise((resolve, reject) => {
+    const contacts: Array<{ name: string; phoneNumber: string; email: string | null }> = [];
+
+    const stream = Readable.from(buffer.toString());
+    stream
+      .pipe(csv())
+      .on('data', (row: any) => {
+        if (row?.name && row?.phoneNumber) {
+          const phoneNumber = String(row.phoneNumber).replace(/\D/g, '');
+          if (!phoneNumber) return;
+          contacts.push({
+            name: String(row.name).trim(),
+            phoneNumber,
+            email: row.email ? String(row.email).trim() : null,
+          });
+        }
+      })
+      .on('end', () => resolve(contacts))
+      .on('error', (err: any) => reject(err));
+  });
+}
+
+// Upload CSV contacts (supports single or multiple files)
+router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 20 }]), async (req: Request, res: Response) => {
   try {
-    if (!req.file) {
+    const uploaded = (req as any).files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const files: Express.Multer.File[] = [
+      ...(uploaded?.files || []),
+      ...(uploaded?.file || []),
+    ];
+
+    if (!files || files.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'No file uploaded',
       });
     }
 
-    const contacts: any[] = [];
-    const stream = Readable.from(req.file.buffer.toString());
+    const perFile: Array<{ filename: string; imported: number }> = [];
+    let totalImported = 0;
 
-    stream
-      .pipe(csv())
-      .on('data', (row: any) => {
-        // Expected CSV format: name, phoneNumber, email (optional)
-        if (row.name && row.phoneNumber) {
-          contacts.push({
-            name: row.name,
-            phoneNumber: row.phoneNumber.replace(/\D/g, ''), // Remove non-digits
-            email: row.email || null,
-          });
-        }
-      })
-      .on('end', async () => {
-        try {
-          // Bulk insert contacts (upsert to avoid duplicates)
-          const result = await Promise.all(
-            contacts.map((contact) =>
-              prisma.contact.upsert({
-                where: { phoneNumber: contact.phoneNumber },
-                update: contact,
-                create: contact,
-              })
-            )
-          );
+    for (const f of files) {
+      const parsed = await parseCsvBuffer(f.buffer);
 
-          res.json({
-            success: true,
-            message: `${result.length} contacts imported successfully`,
-            data: result,
-          });
-        } catch (error: any) {
-          res.status(500).json({
-            success: false,
-            message: error.message,
-          });
-        }
-      });
+      if (parsed.length === 0) {
+        perFile.push({ filename: f.originalname, imported: 0 });
+        continue;
+      }
+
+      const result = await Promise.all(
+        parsed.map((contact) =>
+          prisma.contact.upsert({
+            where: { phoneNumber: contact.phoneNumber },
+            update: contact,
+            create: contact,
+          })
+        )
+      );
+
+      perFile.push({ filename: f.originalname, imported: result.length });
+      totalImported += result.length;
+    }
+
+    return res.json({
+      success: true,
+      message: `${totalImported} contacts imported successfully from ${files.length} file(s)`,
+      data: {
+        imported: totalImported,
+        files: perFile,
+      },
+    });
   } catch (error: any) {
     res.status(500).json({
       success: false,

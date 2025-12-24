@@ -81,9 +81,15 @@ export const contactAPI = {
   getAll: (params?: { page?: number; limit?: number; search?: string }) =>
     api.get('/api/contacts', { params }),
 
-  uploadCSV: (file: File) => {
+  uploadCSV: (fileOrFiles: File | File[]) => {
     const formData = new FormData();
-    formData.append('file', file);
+
+    const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+    // New: multi-file support (preferred)
+    files.forEach((f) => formData.append('files', f));
+    // Legacy: keep single field for older backend compatibility
+    if (files[0]) formData.append('file', files[0]);
+
     return api.post('/api/contacts/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
