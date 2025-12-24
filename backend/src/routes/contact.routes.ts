@@ -11,21 +11,59 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Protect all contact routes
 router.use(authMiddleware);
 
+function normalizeHeader(header: any): string {
+  const raw = String(header ?? '')
+    .replace(/^\uFEFF/, '') // strip BOM
+    .trim()
+    .toLowerCase();
+  // remove common separators/spaces: phone_number, phone-number, "phone number" -> phonenumber
+  return raw.replace(/[^a-z0-9]/g, '');
+}
+
+function detectSeparator(text: string): string {
+  const firstNonEmptyLine =
+    text.split(/\r?\n/).find((l) => l.trim().length > 0) || '';
+  const commaCount = (firstNonEmptyLine.match(/,/g) || []).length;
+  const semiCount = (firstNonEmptyLine.match(/;/g) || []).length;
+  return semiCount > commaCount ? ';' : ',';
+}
+
 function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumber: string; email: string | null }>> {
   return new Promise((resolve, reject) => {
     const contacts: Array<{ name: string; phoneNumber: string; email: string | null }> = [];
 
-    const stream = Readable.from(buffer.toString());
+    const text = buffer.toString('utf8');
+    const separator = detectSeparator(text);
+
+    const stream = Readable.from(text);
     stream
-      .pipe(csv())
+      .pipe(
+        csv({
+          separator,
+          mapHeaders: ({ header }) => normalizeHeader(header),
+        })
+      )
       .on('data', (row: any) => {
-        if (row?.name && row?.phoneNumber) {
-          const phoneNumber = String(row.phoneNumber).replace(/\D/g, '');
+        const name = row?.name || row?.nama || row?.fullname || row?.fullname || row?.contactname;
+        const phoneRaw =
+          row?.phonenumber ||
+          row?.phone ||
+          row?.whatsapp ||
+          row?.wa ||
+          row?.nohp ||
+          row?.nomor ||
+          row?.nomortelepon ||
+          row?.number ||
+          row?.msisdn;
+        const emailRaw = row?.email || row?.mail;
+
+        if (name && phoneRaw) {
+          const phoneNumber = String(phoneRaw).replace(/\D/g, '');
           if (!phoneNumber) return;
           contacts.push({
-            name: String(row.name).trim(),
+            name: String(name).trim(),
             phoneNumber,
-            email: row.email ? String(row.email).trim() : null,
+            email: emailRaw ? String(emailRaw).trim() : null,
           });
         }
       })
@@ -38,10 +76,18 @@ function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumb
 router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 20 }]), async (req: Request, res: Response) => {
   try {
     const uploaded = (req as any).files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-    const files: Express.Multer.File[] = [
+    const combined: Express.Multer.File[] = [
       ...(uploaded?.files || []),
       ...(uploaded?.file || []),
     ];
+
+    // Deduplicate in case client sends both `files` and legacy `file`
+    const files = combined.filter((f, idx) => {
+      const firstIdx = combined.findIndex(
+        (x) => x.originalname === f.originalname && x.size === f.size
+      );
+      return firstIdx === idx;
+    });
 
     if (!files || files.length === 0) {
       return res.status(400).json({

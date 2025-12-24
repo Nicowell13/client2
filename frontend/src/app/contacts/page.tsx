@@ -97,7 +97,12 @@ export default function ContactsPage() {
     setUploading(true);
     try {
       const { data } = await contactAPI.uploadCSV(files);
-      toast.success(data?.message || 'Contacts uploaded');
+      const imported = Number(data?.data?.imported);
+      if (!Number.isNaN(imported) && imported === 0) {
+        toast.error(data?.message || '0 contacts imported. Check CSV header/format.');
+      } else {
+        toast.success(data?.message || 'Contacts uploaded');
+      }
       fetchContacts(page);
     } catch (error) {
       toast.error('Failed to upload contacts');
