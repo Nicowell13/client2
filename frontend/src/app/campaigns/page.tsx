@@ -1,17 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { campaignAPI, sessionAPI } from '@/lib/api-client';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-
-interface CampaignButton {
-  label: string;
-  url: string;
-}
 
 interface Session {
   id: string;
@@ -191,17 +185,17 @@ export default function CampaignsPage() {
                 <label className="block mb-1 font-medium">Message Variants</label>
 
                 {messages.map((msg, idx) => (
-                  <div key={idx} className="flex gap-2 mb-2">
-                    <input
-                      type="text"
+                  <div key={idx} className="flex gap-2 mb-2 items-start">
+                    <textarea
                       value={msg}
                       onChange={(e) => {
                         const arr = [...messages];
                         arr[idx] = e.target.value;
                         setMessages(arr);
                       }}
-                      className="w-full border px-3 py-2 rounded-lg"
-                      placeholder={`Message Variant #${idx + 1}`}
+                      className="w-full border px-3 py-2 rounded-lg resize-y"
+                      placeholder={`Tulis/paste list di sini (Enter untuk baris baru) — Variant #${idx + 1}`}
+                      rows={4}
                     />
 
                     {messages.length > 1 && (
@@ -210,7 +204,8 @@ export default function CampaignsPage() {
                         onClick={() => {
                           setMessages(messages.filter((_, i) => i !== idx));
                         }}
-                        className="px-3 py-2 bg-red-500 text-white rounded"
+                        className="px-3 py-2 bg-red-500 text-white rounded self-start"
+                        aria-label={`Remove message variant ${idx + 1}`}
                       >
                         ✕
                       </button>

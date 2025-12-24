@@ -403,7 +403,7 @@ export default function SessionsPage() {
                 <ol className="text-sm text-gray-600 text-left space-y-1 max-w-md mx-auto">
                   <li>1. Open WhatsApp on your phone</li>
                   <li>2. Tap Menu or Settings → Linked Devices</li>
-                  <li>3. Tap "Link a Device"</li>
+                  <li>3. Tap &quot;Link a Device&quot;</li>
                   <li>4. Point your phone at this QR code</li>
                 </ol>
               </div>
@@ -432,7 +432,7 @@ export default function SessionsPage() {
                   <p className="text-2xl font-bold tracking-widest text-blue-700">{pairingCode}</p>
                 </div>
               )}
-              <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda '+', misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
+              <p className="text-xs text-gray-500">Format: Awali dengan kode negara tanpa tanda &apos;+&apos;, misal Indonesia 62, lalu nomor. Contoh: 6281234567890.</p>
               <p className="text-xs text-gray-500">Dialog akan tetap terbuka sampai status terhubung.</p>
             </div>
           )}
