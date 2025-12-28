@@ -163,6 +163,36 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Start (or restart) an existing session
+router.post('/:id/start', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    const wahaSession = await wahaService.startSession(session.sessionId);
+
+    const updated = await prisma.session.update({
+      where: { id },
+      data: {
+        status: 'starting',
+        qrCode: null,
+      },
+    });
+
+    return res.json({ success: true, data: { session: updated, waha: wahaSession } });
+  } catch (error: any) {
+    console.error('[SESSION] Failed to start session:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to start session',
+    });
+  }
+});
+
 // Get QR Code
 router.get('/:id/qr', async (req: Request, res: Response) => {
   try {

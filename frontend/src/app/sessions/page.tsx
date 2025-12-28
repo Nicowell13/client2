@@ -72,6 +72,10 @@ export default function SessionsPage() {
     return ['working', 'ready', 'authenticated'].includes(normalized);
   };
 
+  const isImageDataUrl = (value: string | undefined | null) => {
+    return typeof value === 'string' && value.startsWith('data:image/');
+  };
+
   const checkAuth = () => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -132,28 +136,19 @@ export default function SessionsPage() {
 
   const handleShowQR = async (session: Session) => {
     setShowPairingUI(false);
-
-    // If we already have a QR stored (from webhook), use it immediately
-    if (session.qrCode) {
-      setSelectedSession(session);
-      setShowQRModal(true);
-      return;
-    }
+    setPairingCode(null);
+    setPhoneInput('');
 
     setSelectedSession(session);
     setShowQRModal(true);
 
-    // Start a 5s timer; if QR still missing, show pairing modal
+    // Start a 5s timer; if QR still missing, show pairing UI
     if (qrWaitTimer) {
       clearTimeout(qrWaitTimer);
       setQrWaitTimer(null);
     }
     const timer = setTimeout(() => {
-      const hasQr = !!(selectedSession?.qrCode || session.qrCode);
-      if (!hasQr) {
-        // Switch UI to pairing-only if QR didn't appear in 5s
-        setShowPairingUI(true);
-      }
+      setShowPairingUI(true);
     }, 5000);
     setQrWaitTimer(timer);
 
@@ -182,6 +177,16 @@ export default function SessionsPage() {
     setStatusPollTimer(poll as unknown as NodeJS.Timeout);
 
     try {
+      // If session is stopped/failed/etc, try (re)starting it so WAHA can generate QR
+      if (!isConnectedStatus(session.status) && ['stopped', 'failed'].includes(String(session.status || '').toLowerCase())) {
+        try {
+          await sessionAPI.start(session.id);
+        } catch (e: any) {
+          // Don't hard-fail; QR endpoint may still work if WAHA is already running
+          console.warn('Failed to start session (continuing):', e?.message || e);
+        }
+      }
+
       const response = await sessionAPI.getQR(session.id);
       const payload = response.data;
       const qr = payload?.data?.qr || payload?.qr || payload?.qrCode || payload?.dataUrl || payload?.data;
@@ -192,6 +197,7 @@ export default function SessionsPage() {
           clearTimeout(qrWaitTimer);
           setQrWaitTimer(null);
         }
+        setShowPairingUI(false);
         // pairing input remains available; no separate modal to close
       } else {
         toast.error('QR code not available yet. Please wait a moment.');
@@ -337,7 +343,7 @@ export default function SessionsPage() {
                       <span className="font-medium">Session ID:</span> {session.sessionId}
                     </div>
                     <div className="flex gap-2">
-                      {session.status !== 'working' && (
+                      {!isConnectedStatus(session.status) && (
                         <Button
                           variant="primary"
                           size="sm"
@@ -348,7 +354,7 @@ export default function SessionsPage() {
                           Scan QR
                         </Button>
                       )}
-                      {session.status === 'working' && (
+                      {isConnectedStatus(session.status) && (
                         <Button
                           variant="secondary"
                           size="sm"
@@ -413,7 +419,20 @@ export default function SessionsPage() {
           {!showPairingUI && selectedSession?.qrCode ? (
             <>
               <div className="bg-white p-6 rounded-2xl inline-block border-4 border-blue-600">
-                <QRCode value={selectedSession.qrCode} size={256} />
+                {isImageDataUrl(selectedSession.qrCode) ? (
+                  // Backend can return a PNG/JPEG data URL (already an image of the QR)
+                  // In that case we must render it as an image, not re-encode it into another QR.
+                  <img
+                    src={selectedSession.qrCode}
+                    alt="WhatsApp QR"
+                    width={256}
+                    height={256}
+                    className="block"
+                  />
+                ) : (
+                  // Raw QR string -> generate QR on the client
+                  <QRCode value={String(selectedSession.qrCode)} size={256} />
+                )}
               </div>
               <div className="mt-6 space-y-2">
                 <p className="text-lg font-semibold text-gray-900">Scan with WhatsApp</p>

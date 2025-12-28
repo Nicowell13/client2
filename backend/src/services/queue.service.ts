@@ -47,8 +47,8 @@ function calcMessageDelay(index: number): number {
   // gradual backoff: grows slowly with index, capped
   const gradual = Math.min(index * random(250, 600), 15000);
 
-  // occasional cooldown to be safe (every 10 messages), capped
-  const periodic = index > 0 && index % 10 === 0 ? random(20000, 40000) : 0;
+  // occasional cooldown to be safe (every 5 messages), capped
+  const periodic = index > 0 && index % 5 === 0 ? random(20000, 40000) : 0;
 
   const delay = base + gradual + periodic;
   return Math.min(delay, 60000);

@@ -64,6 +64,8 @@ export const sessionAPI = {
 
   create: (name: string) => api.post('/api/sessions', { name }),
 
+  start: (sessionId: string) => api.post(`/api/sessions/${sessionId}/start`),
+
   getQR: (sessionId: string) => api.get(`/api/sessions/${sessionId}/qr`),
 
   stop: (sessionId: string) => api.post(`/api/sessions/${sessionId}/stop`),
