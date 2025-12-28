@@ -163,6 +163,7 @@ class WahaService {
       // 1. JSON (base64)
       const jsonResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
         headers: { accept: 'application/json' },
+        params: { format: 'image' },
         validateStatus: () => true,
       });
 
@@ -173,6 +174,7 @@ class WahaService {
       // 2. PNG binary
       const pngResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
         headers: { accept: 'image/png' },
+        params: { format: 'image' },
         responseType: 'arraybuffer',
         validateStatus: () => true,
       });

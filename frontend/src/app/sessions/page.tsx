@@ -193,10 +193,8 @@ export default function SessionsPage() {
       if (qr) {
         setSelectedSession({ ...session, qrCode: qr });
         // If QR arrives, ensure pairing modal is closed and timer cleared
-        if (qrWaitTimer) {
-          clearTimeout(qrWaitTimer);
-          setQrWaitTimer(null);
-        }
+        clearTimeout(timer);
+        setQrWaitTimer(null);
         setShowPairingUI(false);
         // pairing input remains available; no separate modal to close
       } else {

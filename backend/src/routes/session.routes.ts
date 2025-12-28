@@ -215,18 +215,30 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
       let dataUrl: string | null = null;
 
       if (qrResp.format === 'json') {
-        const base64 =
-          qrResp.data?.base64 || qrResp.data?.qr || qrResp.data?.image;
-        if (base64) {
-          dataUrl = base64.startsWith('data:')
-            ? base64
-            : `data:image/png;base64,${base64}`;
+        // WAHA base64 format (docs): { mimetype: 'image/png', data: 'base64...' }
+        const mime = qrResp.data?.mimetype;
+        const data = qrResp.data?.data;
+        if (mime && data) {
+          dataUrl = `data:${mime};base64,${data}`;
+        } else {
+          // Legacy/variant keys
+          const base64 =
+            qrResp.data?.base64 || qrResp.data?.qr || qrResp.data?.image;
+          if (base64) {
+            dataUrl = base64.startsWith('data:')
+              ? base64
+              : `data:image/png;base64,${base64}`;
+          }
         }
       } else if (qrResp.format === 'png') {
         dataUrl = qrResp.data;
       } else if (qrResp.format === 'raw') {
-        // raw text, dikirim apa adanya; frontend yang render
-        dataUrl = qrResp.data;
+        // WAHA raw format (docs): { value: '...' }
+        const rawValue =
+          typeof qrResp.data === 'string'
+            ? qrResp.data
+            : (qrResp.data?.value as string | undefined);
+        if (rawValue) dataUrl = rawValue;
       }
 
       if (dataUrl) {
@@ -246,12 +258,18 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
     if (shot.format === 'jpeg') {
       dataUrl = shot.data; // sudah data URL
     } else if (shot.format === 'json') {
-      const base64 =
-        shot.data?.base64 || shot.data?.file?.base64 || null;
-      if (base64) {
-        dataUrl = base64.startsWith('data:')
-          ? base64
-          : `data:image/jpeg;base64,${base64}`;
+      // WAHA base64 screenshot format (docs): { mimetype: 'image/png', data: 'base64...' }
+      const mime = shot.data?.mimetype;
+      const data = shot.data?.data;
+      if (mime && data) {
+        dataUrl = `data:${mime};base64,${data}`;
+      } else {
+        const base64 = shot.data?.base64 || shot.data?.file?.base64 || null;
+        if (base64) {
+          dataUrl = base64.startsWith('data:')
+            ? base64
+            : `data:image/jpeg;base64,${base64}`;
+        }
       }
     }
 
