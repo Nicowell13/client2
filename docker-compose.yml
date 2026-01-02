@@ -84,6 +84,9 @@ services:
       - WAHA_URL=http://waha:3000
       - BACKEND_URL=https://api.watrix.online
 
+      # Global send limiter (max simultaneous sends across all sessions)
+      - GLOBAL_SEND_CONCURRENCY=2
+
       # Ensure backend uses the same API key as WAHA
       - WAHA_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
       - PORT=4000

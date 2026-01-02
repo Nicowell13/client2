@@ -26,6 +26,7 @@ interface Session {
 
 export default function SessionsPage() {
   const router = useRouter();
+  const MAX_SESSIONS = 5;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -37,7 +38,7 @@ export default function SessionsPage() {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [statusPollTimer, setStatusPollTimer] = useState<NodeJS.Timeout | null>(null);
   const [showPairingUI, setShowPairingUI] = useState(false);
-  // WAHA Plus: allow up to 3 sessions with custom names
+  // WAHA Plus: allow up to 5 sessions with custom names
   const [newSessionName, setNewSessionName] = useState('default');
   const [isCreating, setIsCreating] = useState(false);
 
@@ -109,9 +110,9 @@ export default function SessionsPage() {
   };
 
   const handleCreateSession = async () => {
-    // WAHA Plus: limit max 3 sessions
-    if (sessions.length >= 3) {
-      toast.error('Maksimal 3 sesi aktif. Silakan hubungi admin untuk menambah sesi.');
+    // WAHA Plus: limit max sessions
+    if (sessions.length >= MAX_SESSIONS) {
+      toast.error(`Maksimal ${MAX_SESSIONS} sesi aktif. Silakan hubungi admin untuk menambah sesi.`);
       setShowCreateModal(false);
       return;
     }
@@ -383,7 +384,7 @@ export default function SessionsPage() {
       <Modal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        title="Buat Sesi Baru (maks. 3)"
+        title={`Buat Sesi Baru (maks. ${MAX_SESSIONS})`}
         footer={
           <>
             <Button variant="outline" onClick={() => setShowCreateModal(false)}>
@@ -402,7 +403,7 @@ export default function SessionsPage() {
             value={newSessionName}
             onChange={(e) => setNewSessionName(e.target.value)}
           />
-          <p className="text-xs text-gray-500">Anda dapat membuat hingga 3 sesi aktif. Jika butuh lebih, silakan hubungi admin.</p>
+          <p className="text-xs text-gray-500">Anda dapat membuat hingga {MAX_SESSIONS} sesi aktif. Jika butuh lebih, silakan hubungi admin.</p>
         </div>
       </Modal>
 

@@ -4,17 +4,13 @@ import wahaService from './waha.service';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-// ===============================
-// QUEUE INITIALIZATION
-// ===============================
-export const campaignQueue = new Bull('campaign-messages', REDIS_URL, {
-  defaultJobOptions: {
-    removeOnComplete: true,
-    removeOnFail: false,
-    attempts: 1, // IMPORTANT: avoid double send
-    backoff: { type: 'exponential', delay: 2000 },
-  },
-});
+const DEFAULT_QUEUE_NAME = 'campaign-messages';
+const sessionQueues = new Map<string, Bull.Queue<CampaignJob>>();
+
+const GLOBAL_SEND_CONCURRENCY = Number(process.env.GLOBAL_SEND_CONCURRENCY || 0);
+const GLOBAL_SEND_KEY = process.env.GLOBAL_SEND_KEY || 'campaign:global_send_active';
+// Safety TTL to avoid a stuck counter if the process crashes mid-send.
+const GLOBAL_SEND_TTL_MS = Number(process.env.GLOBAL_SEND_TTL_MS || 60_000);
 
 // ===============================
 // JOB PAYLOAD INTERFACE
@@ -58,6 +54,10 @@ function batchCooldown(batchIndex: number): number {
   return batchIndex === 0 ? 0 : random(30000, 45000);
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // ========================================================
 // SAFE WA MESSAGE ID NORMALIZER
 // ========================================================
@@ -94,10 +94,75 @@ async function safeCampaignUpdate(
   return true;
 }
 
-// ========================================================
-// QUEUE PROCESSOR
-// ========================================================
-campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
+function normalizeSessionName(input: unknown): string {
+  const name = String(input ?? '').trim();
+  return name.length > 0 ? name : 'default';
+}
+
+function sanitizeQueueSegment(sessionName: string): string {
+  // Keep queue names stable & Redis-friendly; avoid spaces / weird chars.
+  return sessionName.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function buildQueueName(sessionName: string): string {
+  const normalized = normalizeSessionName(sessionName);
+  if (normalized === 'default') return DEFAULT_QUEUE_NAME;
+  return `${DEFAULT_QUEUE_NAME}:${sanitizeQueueSegment(normalized)}`;
+}
+
+async function getRedisClient(): Promise<any> {
+  // Bull initializes redis lazily; ensure we have at least the default queue.
+  const q = getCampaignQueue('default');
+  const clientOrPromise = (q as any).client;
+  return await Promise.resolve(clientOrPromise);
+}
+
+async function acquireGlobalSendSlot() {
+  if (!Number.isFinite(GLOBAL_SEND_CONCURRENCY) || GLOBAL_SEND_CONCURRENCY <= 0) return;
+
+  const client = await getRedisClient();
+
+  // Atomically: INCR, if above limit then DECR and fail.
+  const lua = `
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local ttl = tonumber(ARGV[2])
+    local new = redis.call('incr', key)
+    if new > limit then
+      redis.call('decr', key)
+      return 0
+    end
+    redis.call('pexpire', key, ttl)
+    return new
+  `;
+
+  while (true) {
+    const res = await client.eval(lua, 1, GLOBAL_SEND_KEY, String(GLOBAL_SEND_CONCURRENCY), String(GLOBAL_SEND_TTL_MS));
+    if (Number(res) > 0) return;
+    // Small jitter so multiple workers don't thundering-herd.
+    await sleep(random(200, 500));
+  }
+}
+
+async function releaseGlobalSendSlot() {
+  if (!Number.isFinite(GLOBAL_SEND_CONCURRENCY) || GLOBAL_SEND_CONCURRENCY <= 0) return;
+
+  const client = await getRedisClient();
+
+  const lua = `
+    local key = KEYS[1]
+    local val = redis.call('decr', key)
+    if val <= 0 then
+      redis.call('del', key)
+      return 0
+    end
+    return val
+  `;
+
+  await client.eval(lua, 1, GLOBAL_SEND_KEY);
+}
+
+async function processCampaignJob(job: Bull.Job<CampaignJob>) {
   const {
     campaignId,
     contactId,
@@ -143,13 +208,23 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
     // ------------------------------------
     // SEND MESSAGE
     // ------------------------------------
-    const result = await wahaService.sendMessageWithButtons(
-      sessionName,
-      phoneNumber,
-      message,
-      imageUrl,
-      buttons
-    );
+    await acquireGlobalSendSlot();
+    let result: any;
+    try {
+      result = await wahaService.sendMessageWithButtons(
+        sessionName,
+        phoneNumber,
+        message,
+        imageUrl,
+        buttons
+      );
+    } finally {
+      try {
+        await releaseGlobalSendSlot();
+      } catch (e: any) {
+        console.warn('⚠ Failed to release global send slot:', e?.message || e);
+      }
+    }
 
     const waMessageId = extractWAId(result);
 
@@ -213,37 +288,65 @@ campaignQueue.process(1, async (job: Bull.Job<CampaignJob>) => {
 
     throw error;
   }
-});
+}
 
-// ========================================================
-// QUEUE EVENTS
-// ========================================================
-campaignQueue.on('completed', async (job) => {
-  const { campaignId } = job.data;
+function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
+  // One worker per queue (per session) for parallel sending across sessions,
+  // while keeping sequential sending within each session.
+  queue.process(1, processCampaignJob);
 
-  const pending = await prisma.message.count({
-    where: { campaignId, status: 'pending' },
+  queue.on('completed', async (job) => {
+    const { campaignId } = job.data;
+
+    const pending = await prisma.message.count({
+      where: { campaignId, status: 'pending' },
+    });
+
+    if (pending === 0) {
+      const failed = await prisma.message.count({
+        where: { campaignId, status: 'failed' },
+      });
+
+      await safeCampaignUpdate(campaignId, {
+        status: failed > 0 ? 'sent' : 'sent',
+      });
+
+      console.log(`🎉 Campaign ${campaignId} finished`);
+    }
   });
 
-  if (pending === 0) {
-    const failed = await prisma.message.count({
-      where: { campaignId, status: 'failed' },
-    });
+  queue.on('failed', async (job, err) => {
+    console.error(`❌ Job ${job.id} failed:`, err.message);
+  });
 
-    await safeCampaignUpdate(campaignId, {
-      status: failed > 0 ? 'sent' : 'sent',
-    });
+  queue.on('stalled', (job) => {
+    console.warn(`⚠ Job ${job.id} stalled (possible WAHA/network hang)`);
+  });
+}
 
-    console.log(`🎉 Campaign ${campaignId} finished`);
-  }
-});
+// ===============================
+// QUEUE FACTORY (ONE QUEUE/WORKER PER SESSION)
+// ===============================
+export function getCampaignQueue(sessionName: string) {
+  const normalized = normalizeSessionName(sessionName);
+  const existing = sessionQueues.get(normalized);
+  if (existing) return existing;
 
-campaignQueue.on('failed', async (job, err) => {
-  console.error(`❌ Job ${job.id} failed:`, err.message);
-});
+  const queueName = buildQueueName(normalized);
+  const queue = new Bull<CampaignJob>(queueName, REDIS_URL, {
+    defaultJobOptions: {
+      removeOnComplete: true,
+      removeOnFail: false,
+      attempts: 1, // IMPORTANT: avoid double send
+      backoff: { type: 'exponential', delay: 2000 },
+    },
+  });
 
-campaignQueue.on('stalled', (job) => {
-  console.warn(`⚠ Job ${job.id} stalled (possible WAHA/network hang)`);
-});
+  attachQueueHandlers(queue);
+  sessionQueues.set(normalized, queue);
+  return queue;
+}
 
+// Backward compatibility: keep the original default export.
+export const campaignQueue = getCampaignQueue('default');
 export default campaignQueue;

@@ -3,7 +3,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import wahaService from '../services/waha.service';
-import campaignQueue from '../services/queue.service';
+import { getCampaignQueue } from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -232,6 +232,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       label: b.label,
       url: b.url,
     }));
+
+    // One queue/worker per session for parallel sending across sessions
+    const campaignQueue = getCampaignQueue(campaign.session.sessionId);
 
     for (let b = 0; b < batches.length; b++) {
       const batch = batches[b];

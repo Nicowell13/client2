@@ -5,6 +5,7 @@ import wahaService from '../services/waha.service';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
+const MAX_SESSIONS = 5;
 
 // Protect all session routes
 router.use(authMiddleware);
@@ -16,12 +17,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     console.log('[SESSION] Creating session:', name);
 
-    // Allow custom session names, but limit to max 3 active records
+    // Allow custom session names, but limit to max active records
     const totalSessions = await prisma.session.count();
-    if (totalSessions >= 3) {
+    if (totalSessions >= MAX_SESSIONS) {
       return res.status(400).json({
         success: false,
-        message: 'Maksimal 3 sesi aktif. Silakan hubungi admin untuk menambah sesi.',
+        message: `Maksimal ${MAX_SESSIONS} sesi aktif. Silakan hubungi admin untuk menambah sesi.`,
       });
     }
 
