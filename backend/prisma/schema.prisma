@@ -43,6 +43,7 @@ model Session {
   updatedAt   DateTime   @updatedAt
 
   campaigns   Campaign[]
+  contacts    Contact[]
 
   @@map("sessions")
 }
@@ -60,9 +61,12 @@ model Contact {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  sessionId   String
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
   messages    Message[] @relation("ContactMessages")
 
-  @@unique([phoneNumber])
+  @@unique([phoneNumber, sessionId])
   @@map("contacts")
 }
 
