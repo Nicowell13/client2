@@ -1,3 +1,5 @@
+
+import { Parser as CsvParser } from 'json2csv';
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import csv from 'csv-parser';
@@ -7,6 +9,36 @@ import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+// INTERNAL: Export and delete contacts (CSV, only via terminal/curl, not for frontend UI)
+router.post('/export-and-delete', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body;
+    let where: any = {};
+    if (sessionId) where.sessionId = String(sessionId);
+
+    const contacts = await prisma.contact.findMany({ where });
+    if (!contacts.length) {
+      return res.status(404).json({ success: false, message: 'No contacts found to export.' });
+    }
+
+    // Prepare CSV
+    const fields = ['id', 'name', 'phoneNumber', 'email', 'createdAt', 'sessionId'];
+    const parser = new CsvParser({ fields });
+    const csv = parser.parse(contacts);
+
+    // Hapus kontak yang diekspor
+    await prisma.contact.deleteMany({ where });
+
+    // Kirim file CSV
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="contacts_export.csv"');
+    res.status(200).send(csv);
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 
 // Protect all contact routes
 router.use(authMiddleware);
@@ -75,6 +107,10 @@ function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumb
 // Upload CSV contacts (supports single or multiple files)
 router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 20 }]), async (req: Request, res: Response) => {
   try {
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: 'sessionId is required' });
+    }
     const uploaded = (req as any).files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const combined: Express.Multer.File[] = [
       ...(uploaded?.files || []),
@@ -106,17 +142,15 @@ router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'fi
         perFile.push({ filename: f.originalname, imported: 0 });
         continue;
       }
-
       const result = await Promise.all(
         parsed.map((contact) =>
           prisma.contact.upsert({
-            where: { phoneNumber: contact.phoneNumber },
-            update: contact,
-            create: contact,
+            where: { phoneNumber_sessionId: { phoneNumber: contact.phoneNumber, sessionId } },
+            update: { ...contact, sessionId },
+            create: { ...contact, sessionId },
           })
         )
       );
-
       perFile.push({ filename: f.originalname, imported: result.length });
       totalImported += result.length;
     }
@@ -140,17 +174,22 @@ router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'fi
 // Get all contacts
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { page = 1, limit = 50, search = '' } = req.query;
+    const { page = 1, limit = 50, search = '', sessionId } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where = search
-      ? {
-          OR: [
-            { name: { contains: String(search), mode: 'insensitive' as const } },
-            { phoneNumber: { contains: String(search) } },
-          ],
-        }
-      : {};
+    let where: any = {};
+    if (sessionId) {
+      where.sessionId = String(sessionId);
+    }
+    if (search) {
+      where = {
+        ...where,
+        OR: [
+          { name: { contains: String(search), mode: 'insensitive' as const } },
+          { phoneNumber: { contains: String(search) } },
+        ],
+      };
+    }
 
     const [contacts, total] = await Promise.all([
       prisma.contact.findMany({
@@ -221,12 +260,12 @@ router.post('/bulk-delete', async (req: Request, res: Response) => {
 // Create contact manually
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, phoneNumber, email } = req.body;
+    const { name, phoneNumber, email, sessionId } = req.body;
 
-    if (!name || !phoneNumber) {
+    if (!name || !phoneNumber || !sessionId) {
       return res.status(400).json({
         success: false,
-        message: 'Name and phone number are required',
+        message: 'Name, phone number, and sessionId are required',
       });
     }
 
@@ -235,6 +274,7 @@ router.post('/', async (req: Request, res: Response) => {
         name,
         phoneNumber: phoneNumber.replace(/\D/g, ''),
         email,
+        sessionId,
       },
     });
 

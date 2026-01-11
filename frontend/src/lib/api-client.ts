@@ -80,17 +80,16 @@ export const sessionAPI = {
 // CONTACT API
 // =========================
 export const contactAPI = {
-  getAll: (params?: { page?: number; limit?: number; search?: string }) =>
+  getAll: (params?: { page?: number; limit?: number; search?: string; sessionId?: string }) =>
     api.get('/api/contacts', { params }),
 
-  uploadCSV: (fileOrFiles: File | File[]) => {
+  uploadCSV: (fileOrFiles: File | File[], sessionId?: string) => {
     const formData = new FormData();
 
     const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
-    // New: multi-file support (preferred)
     files.forEach((f) => formData.append('files', f));
-    // Legacy: keep single field for older backend compatibility
     if (files[0]) formData.append('file', files[0]);
+    if (sessionId) formData.append('sessionId', sessionId);
 
     return api.post('/api/contacts/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -111,7 +110,14 @@ export const contactAPI = {
 export const campaignAPI = {
   getAll: () => api.get('/api/campaigns'),
 
-  create: (data: any) => api.post('/api/campaigns', data),
+  create: (data: any) => {
+    if (typeof window !== 'undefined' && data instanceof FormData) {
+      return api.post('/api/campaigns', data, {
+        headers: {}, // Let browser set Content-Type for FormData
+      });
+    }
+    return api.post('/api/campaigns', data);
+  },
 
   /** FIX UTAMA → sekarang mengirim sessionId */
   send: (campaignId: string, sessionId: string, contactIds: string[]) =>

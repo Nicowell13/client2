@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import Link from 'next/link';
 import { ArrowLeft, Upload, Plus, Trash2 } from 'lucide-react';
-import { contactAPI } from '@/lib/api-client';
+import { contactAPI, sessionAPI } from '@/lib/api-client';
 import toast from 'react-hot-toast';
 import { useDropzone } from 'react-dropzone';
 
@@ -15,6 +15,14 @@ interface Contact {
   phoneNumber: string;
   email: string | null;
   createdAt: string;
+  sessionId: string;
+  session?: { id: string; name: string };
+}
+
+interface Session {
+  id: string;
+  name: string;
+  status: string;
 }
 
 interface ContactsPagination {
@@ -27,6 +35,8 @@ interface ContactsPagination {
 export default function ContactsPage() {
   const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [selectedSession, setSelectedSession] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -42,8 +52,34 @@ export default function ContactsPage() {
       router.push('/login');
       return;
     }
-    fetchContacts(1);
+    fetchSessions();
   }, []);
+
+  useEffect(() => {
+    if (sessions.length > 0 && !selectedSession) {
+      setSelectedSession(sessions[0].id);
+    }
+  }, [sessions]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds(new Set());
+  }, [selectedSession]);
+
+  useEffect(() => {
+    if (selectedSession) fetchContacts(page);
+    setSelectedIds(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSession, page]);
+
+  const fetchSessions = async () => {
+    try {
+      const res = await sessionAPI.getAll();
+      setSessions(res.data?.data || []);
+    } catch {
+      toast.error("Failed to load sessions");
+    }
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -73,8 +109,9 @@ export default function ContactsPage() {
   };
 
   const fetchContacts = async (targetPage: number) => {
+    if (!selectedSession) return;
     try {
-      const resp = await contactAPI.getAll({ page: targetPage, limit });
+      const resp = await contactAPI.getAll({ page: targetPage, limit, sessionId: selectedSession });
       const payload = resp.data;
       const data = Array.isArray(payload) ? payload : payload?.data || [];
       setContacts(data);
@@ -92,11 +129,11 @@ export default function ContactsPage() {
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const files = acceptedFiles || [];
-    if (files.length === 0) return;
+    if (files.length === 0 || !selectedSession) return;
 
     setUploading(true);
     try {
-      const { data } = await contactAPI.uploadCSV(files);
+      const { data } = await contactAPI.uploadCSV(files, selectedSession);
       const imported = Number(data?.data?.imported);
       if (!Number.isNaN(imported) && imported === 0) {
         toast.error(data?.message || '0 contacts imported. Check CSV header/format.');
@@ -109,7 +146,7 @@ export default function ContactsPage() {
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [selectedSession, page]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -120,8 +157,9 @@ export default function ContactsPage() {
 
   const addContact = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedSession) return toast.error('Please select a session');
     try {
-      await contactAPI.create(newContact);
+      await contactAPI.create({ ...newContact, sessionId: selectedSession });
       toast.success('Contact added successfully');
       setNewContact({ name: '', phoneNumber: '', email: '' });
       setShowAddForm(false);
@@ -203,6 +241,20 @@ export default function ContactsPage() {
               Delete All
             </button>
           </div>
+        </div>
+
+        {/* Session Selector */}
+        <div className="mb-6">
+          <label className="block mb-1 font-medium">Select Session</label>
+          <select
+            className="w-full border px-3 py-2 rounded-lg"
+            value={selectedSession}
+            onChange={e => setSelectedSession(e.target.value)}
+          >
+            {sessions.map(s => (
+              <option key={s.id} value={s.id}>{s.name} ({s.status})</option>
+            ))}
+          </select>
         </div>
 
         {/* Upload CSV */}
