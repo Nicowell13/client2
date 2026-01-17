@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { Plus } from 'lucide-react';
-import { campaignAPI, sessionAPI } from '@/lib/api-client';
+import { campaignAPI, sessionAPI, uploadAPI } from '@/lib/api-client';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
@@ -33,6 +33,10 @@ export default function CampaignsPage() {
     button2Url: "",
   });
 
+  // Image upload state
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
+
   /* =======================================================
      LOAD CAMPAIGNS + SESSIONS
   ======================================================= */
@@ -61,6 +65,47 @@ export default function CampaignsPage() {
       setSessions(res.data?.data || []);
     } catch {
       toast.error("Failed to load sessions");
+    }
+  };
+
+  /* =======================================================
+     HANDLE IMAGE UPLOAD
+  ======================================================= */
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+
+    // Validate file size (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Image size must be less than 10MB');
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      const res = await uploadAPI.uploadImage(file);
+      const imageUrl = res.data?.data?.url;
+      
+      if (imageUrl) {
+        // Get full URL (relative path from backend)
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.watrix.online';
+        const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${API_BASE_URL}${imageUrl}`;
+        
+        setNewCampaign({ ...newCampaign, imageUrl: fullImageUrl });
+        setUploadedImagePreview(fullImageUrl);
+        toast.success('Image uploaded successfully');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to upload image');
+      console.error(err);
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -103,6 +148,7 @@ export default function CampaignsPage() {
         button2Label: "",
         button2Url: "",
       });
+      setUploadedImagePreview(null);
       setShowCreateForm(false);
       fetchCampaigns();
     } catch (err) {
@@ -222,16 +268,61 @@ export default function CampaignsPage() {
                 </button>
               </div>
 
-              {/* IMAGE URL */}
+              {/* IMAGE UPLOAD / URL */}
               <div>
-                <label className="block mb-1 font-medium">Image URL (optional)</label>
+                <label className="block mb-1 font-medium">Image (optional)</label>
+                
+                {/* Upload Button */}
+                <div className="mb-2">
+                  <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700">
+                    {uploadingImage ? 'Uploading...' : 'Upload Image'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageUpload}
+                      disabled={uploadingImage}
+                    />
+                  </label>
+                  <span className="ml-2 text-sm text-gray-500">or enter URL below</span>
+                </div>
+
+                {/* Image Preview */}
+                {uploadedImagePreview && (
+                  <div className="mb-2">
+                    <img
+                      src={uploadedImagePreview}
+                      alt="Preview"
+                      className="max-w-xs max-h-48 rounded-lg border"
+                      onError={() => setUploadedImagePreview(null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadedImagePreview(null);
+                        setNewCampaign({ ...newCampaign, imageUrl: "" });
+                      }}
+                      className="mt-1 text-sm text-red-600 hover:text-red-800"
+                    >
+                      Remove Image
+                    </button>
+                  </div>
+                )}
+
+                {/* URL Input (fallback) */}
                 <input
                   type="url"
                   className="w-full border px-3 py-2 rounded-lg"
+                  placeholder="Or paste image URL here"
                   value={newCampaign.imageUrl}
-                  onChange={(e) =>
-                    setNewCampaign({ ...newCampaign, imageUrl: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setNewCampaign({ ...newCampaign, imageUrl: e.target.value });
+                    if (e.target.value) {
+                      setUploadedImagePreview(e.target.value);
+                    } else {
+                      setUploadedImagePreview(null);
+                    }
+                  }}
                 />
               </div>
 

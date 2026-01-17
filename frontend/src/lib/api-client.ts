@@ -138,3 +138,16 @@ export const messageAPI = {
   getByCampaign: (campaignId: string) =>
     api.get(`/api/campaigns/${campaignId}/messages`),
 };
+
+// =========================
+// UPLOAD API
+// =========================
+export const uploadAPI = {
+  uploadImage: (file: File) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/api/upload/image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
