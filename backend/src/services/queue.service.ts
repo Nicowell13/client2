@@ -206,6 +206,34 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     await new Promise((r) => setTimeout(r, delay));
 
     // ------------------------------------
+    // CHECK SESSION STATUS BEFORE SENDING
+    // ------------------------------------
+    try {
+      const sessionStatus = await wahaService.getSessionStatus(sessionName);
+      const normalizedStatus = (sessionStatus?.status || '').toLowerCase();
+      
+      if (!['working', 'ready', 'authenticated'].includes(normalizedStatus)) {
+        // Update session status in DB
+        const session = await prisma.session.findFirst({
+          where: { sessionId: sessionName },
+        });
+        
+        if (session) {
+          await prisma.session.update({
+            where: { id: session.id },
+            data: { status: normalizedStatus || 'stopped' },
+          });
+        }
+        
+        throw new Error(`Session ${sessionName} is not active. Status: ${normalizedStatus}`);
+      }
+    } catch (statusError: any) {
+      // If status check fails, session might be logged out
+      console.warn(`⚠ Session ${sessionName} status check failed:`, statusError.message);
+      throw new Error(`Session ${sessionName} unavailable or logged out`);
+    }
+
+    // ------------------------------------
     // SEND MESSAGE
     // ------------------------------------
     await acquireGlobalSendSlot();
@@ -269,6 +297,38 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       await safeCampaignUpdate(campaignId, { sentCount: { increment: 1 } });
 
       return { success: true, warning: 'webjs-non-fatal' };
+    }
+
+    // =====================================================
+    // DETECT SESSION LOGOUT/ERROR
+    // =====================================================
+    const isSessionError =
+      errorMsg.toLowerCase().includes('session') ||
+      errorMsg.toLowerCase().includes('logout') ||
+      errorMsg.toLowerCase().includes('not active') ||
+      errorMsg.toLowerCase().includes('unavailable') ||
+      errorMsg.toLowerCase().includes('authenticated') ||
+      errorMsg.toLowerCase().includes('connection');
+
+    if (isSessionError) {
+      console.error(`❌ Session error detected for ${sessionName}:`, errorMsg);
+      
+      // Update session status to stopped/logged out
+      try {
+        const session = await prisma.session.findFirst({
+          where: { sessionId: sessionName },
+        });
+        
+        if (session) {
+          await prisma.session.update({
+            where: { id: session.id },
+            data: { status: 'stopped' },
+          });
+          console.log(`⚠ Updated session ${sessionName} status to stopped`);
+        }
+      } catch (updateError: any) {
+        console.warn('⚠ Failed to update session status:', updateError.message);
+      }
     }
 
     // =====================================================

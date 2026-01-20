@@ -5,6 +5,7 @@ import prisma from '../lib/prisma';
 import wahaService from '../services/waha.service';
 import { getCampaignQueue } from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
+import { executeAutoCampaigns } from '../services/auto-campaign.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -332,6 +333,36 @@ router.delete('/:id', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[CAMPAIGN][DELETE]', error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ===========================================================
+ AUTO EXECUTE CAMPAIGNS (WITH SESSION ROTATION)
+=========================================================== */
+router.post('/auto-execute', async (req: Request, res: Response) => {
+  try {
+    const { delayBetweenCampaigns } = req.body;
+
+    const result = await executeAutoCampaigns({
+      delayBetweenCampaigns: delayBetweenCampaigns
+        ? Number(delayBetweenCampaigns)
+        : undefined,
+    });
+
+    return res.json({
+      success: result.success,
+      message: result.message,
+      data: {
+        campaignsProcessed: result.campaignsProcessed,
+        results: result.results || [],
+      },
+    });
+  } catch (error: any) {
+    console.error('[CAMPAIGN][AUTO-EXECUTE]', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to execute auto campaigns',
+    });
   }
 });
 

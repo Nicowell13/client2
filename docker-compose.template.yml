@@ -1,0 +1,155 @@
+version: '3.8'
+
+# Template untuk Multi-Instance Setup
+# Gunakan script generate-instance.sh untuk generate docker-compose.yml per instance
+# Atau gunakan environment variable INSTANCE_NUM untuk customize
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: whatsapp-postgres-${INSTANCE_NUM:-1}
+    environment:
+      POSTGRES_USER: whatsapp_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whatsapp_pass}
+      POSTGRES_DB: whatsapp_db_${INSTANCE_NUM:-1}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data_${INSTANCE_NUM:-1}:/var/lib/postgresql/data
+    networks:
+      - whatsapp-network-${INSTANCE_NUM:-1}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whatsapp_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Queue Management
+  redis:
+    image: redis:7-alpine
+    container_name: whatsapp-redis-${INSTANCE_NUM:-1}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data_${INSTANCE_NUM:-1}:/data
+    networks:
+      - whatsapp-network-${INSTANCE_NUM:-1}
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # WAHA Plus (WhatsApp HTTP API - Premium Version)
+  waha:
+    image: devlikeapro/waha-plus:latest
+    container_name: whatsapp-waha-${INSTANCE_NUM:-1}
+    ports:
+      - "${WAHA_PORT:-3000}:3000"
+    environment:
+      # WAHA Configuration
+      - WAHA_PRINT_QR=True
+      - WHATSAPP_API_PORT=3000
+      - WHATSAPP_API_HOSTNAME=0.0.0.0
+      
+      # Security - API Key untuk autentikasi
+      - WHATSAPP_API_KEY=${WAHA_API_KEY}
+      
+      # WAHA Plus License (required for waha-plus)
+      - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
+      
+      # Session configuration
+      - WHATSAPP_RESTART_ALL_SESSIONS=True
+      - WHATSAPP_START_SESSIONS=default
+      
+      # Engine (WAHA Plus WEBJS engine)
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      
+      # Webhook configuration
+      - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
+      - WHATSAPP_HOOK_URL=http://backend:4000/webhook/whatsapp
+      
+      # Files & Media
+      - WHATSAPP_FILES_FOLDER=/app/files
+      - WHATSAPP_FILES_LIFETIME=180
+      
+    volumes:
+      - waha_data_${INSTANCE_NUM:-1}:/app/.sessions
+      - waha_files_${INSTANCE_NUM:-1}:/app/files
+    networks:
+      - whatsapp-network-${INSTANCE_NUM:-1}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+
+  # Express Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: whatsapp-backend-${INSTANCE_NUM:-1}
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://whatsapp_user:${POSTGRES_PASSWORD:-whatsapp_pass}@postgres:5432/whatsapp_db_${INSTANCE_NUM:-1}
+      - REDIS_URL=redis://redis:6379
+      - WAHA_URL=http://waha:3000
+      - BACKEND_URL=https://api${INSTANCE_NUM:-1}.watrix.online
+
+      # Global send limiter (max simultaneous sends across all sessions)
+      - GLOBAL_SEND_CONCURRENCY=2
+
+      # Ensure backend uses the same API key as WAHA
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - PORT=4000
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      waha:
+        condition: service_started
+    networks:
+      - whatsapp-network-${INSTANCE_NUM:-1}
+    restart: unless-stopped
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://api${INSTANCE_NUM:-1}.watrix.online
+    container_name: whatsapp-frontend-${INSTANCE_NUM:-1}
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    environment:
+      - PORT=3001
+      - NEXT_PUBLIC_API_URL=https://api${INSTANCE_NUM:-1}.watrix.online
+    depends_on:
+      - backend
+    networks:
+      - whatsapp-network-${INSTANCE_NUM:-1}
+    restart: unless-stopped
+
+networks:
+  whatsapp-network-${INSTANCE_NUM:-1}:
+    driver: bridge
+    name: whatsapp-network-${INSTANCE_NUM:-1}
+
+volumes:
+  postgres_data_${INSTANCE_NUM:-1}:
+    name: postgres_data_${INSTANCE_NUM:-1}
+  redis_data_${INSTANCE_NUM:-1}:
+    name: redis_data_${INSTANCE_NUM:-1}
+  waha_data_${INSTANCE_NUM:-1}:
+    name: waha_data_${INSTANCE_NUM:-1}
+  waha_files_${INSTANCE_NUM:-1}:
+    name: waha_files_${INSTANCE_NUM:-1}

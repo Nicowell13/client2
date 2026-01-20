@@ -126,6 +126,11 @@ export const campaignAPI = {
       contactIds,
     }),
 
+  autoExecute: (delayBetweenCampaigns?: number) =>
+    api.post('/api/campaigns/auto-execute', {
+      delayBetweenCampaigns,
+    }),
+
   delete: (campaignId: string) => api.delete(`/api/campaigns/${campaignId}`),
 };
 

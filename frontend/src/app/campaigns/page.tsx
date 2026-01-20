@@ -19,6 +19,8 @@ export default function CampaignsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [autoExecuting, setAutoExecuting] = useState(false);
+  const [delayBetweenCampaigns, setDelayBetweenCampaigns] = useState(60); // seconds
 
   // ⭐ NEW: Dynamic message variants
   const [messages, setMessages] = useState<string[]>([""]);
@@ -190,6 +192,70 @@ export default function CampaignsPage() {
   };
 
   /* =======================================================
+     AUTO EXECUTE CAMPAIGNS
+  ======================================================= */
+  const autoExecuteCampaigns = async () => {
+    const draftCampaigns = campaigns.filter((c) => c.status === 'draft');
+    
+    if (draftCampaigns.length === 0) {
+      toast.error('Tidak ada campaign draft untuk dieksekusi');
+      return;
+    }
+
+    if (draftCampaigns.length > 5) {
+      toast.error('Maksimal 5 campaign dapat dieksekusi secara otomatis');
+      return;
+    }
+
+    const activeSessions = sessions.filter((s) => 
+      ['working', 'ready', 'authenticated'].includes(s.status.toLowerCase())
+    );
+
+    if (activeSessions.length === 0) {
+      toast.error('Tidak ada session aktif. Pastikan minimal 1 session aktif.');
+      return;
+    }
+
+    if (!confirm(
+      `Eksekusi ${draftCampaigns.length} campaign secara otomatis?\n` +
+      `Delay antar campaign: ${delayBetweenCampaigns} detik\n` +
+      `Session aktif: ${activeSessions.length}`
+    )) return;
+
+    setAutoExecuting(true);
+    try {
+      const delayMs = delayBetweenCampaigns * 1000;
+      const res = await campaignAPI.autoExecute(delayMs);
+      
+      if (res.data?.success) {
+        toast.success(
+          `Berhasil memproses ${res.data.data?.campaignsProcessed || 0} campaign`
+        );
+        
+        // Show results
+        if (res.data.data?.results) {
+          const results = res.data.data.results;
+          const successCount = results.filter((r: any) => r.success).length;
+          const failedCount = results.filter((r: any) => !r.success).length;
+          
+          if (failedCount > 0) {
+            toast.error(`${failedCount} campaign gagal. ${successCount} berhasil.`);
+          }
+        }
+      } else {
+        toast.error(res.data?.message || 'Gagal mengeksekusi campaign');
+      }
+      
+      fetchCampaigns();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Gagal mengeksekusi campaign');
+      console.error(err);
+    } finally {
+      setAutoExecuting(false);
+    }
+  };
+
+  /* =======================================================
      RENDER UI
   ======================================================= */
   return (
@@ -203,6 +269,37 @@ export default function CampaignsPage() {
           >
             <Plus className="w-5 h-5" /> New Campaign
           </button>
+
+          {/* AUTO EXECUTE SECTION */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600">Delay (detik):</label>
+              <input
+                type="number"
+                min="10"
+                max="300"
+                value={delayBetweenCampaigns}
+                onChange={(e) => setDelayBetweenCampaigns(Number(e.target.value))}
+                className="w-20 border px-2 py-1 rounded text-sm"
+                disabled={autoExecuting}
+              />
+            </div>
+            <button
+              onClick={autoExecuteCampaigns}
+              disabled={autoExecuting || campaigns.filter((c) => c.status === 'draft').length === 0}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {autoExecuting ? (
+                <>
+                  <span className="animate-spin">⏳</span> Processing...
+                </>
+              ) : (
+                <>
+                  <span>🚀</span> Auto Execute Campaigns
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* ================= CREATE CAMPAIGN FORM ================ */}

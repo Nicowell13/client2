@@ -1,0 +1,277 @@
+version: '3.8'
+
+# Docker Compose untuk 10 Instances - Semua dalam 1 file
+# Catatan: File ini sangat besar. Disarankan menggunakan generate-instances.sh
+# untuk membuat docker-compose.yml terpisah per instance di direktori berbeda.
+
+# ============================================================================
+# INSTANCE 1 - app1.watrix.online
+# ============================================================================
+
+services:
+  # Instance 1 - PostgreSQL
+  postgres-1:
+    image: postgres:15-alpine
+    container_name: whatsapp-postgres-1
+    environment:
+      POSTGRES_USER: whatsapp_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_1:-whatsapp_pass_1}
+      POSTGRES_DB: whatsapp_db_1
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_1:/var/lib/postgresql/data
+    networks:
+      - whatsapp-network-1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whatsapp_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Instance 1 - Redis
+  redis-1:
+    image: redis:7-alpine
+    container_name: whatsapp-redis-1
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_1:/data
+    networks:
+      - whatsapp-network-1
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Instance 1 - WAHA Plus
+  waha-1:
+    image: devlikeapro/waha-plus:latest
+    container_name: whatsapp-waha-1
+    ports:
+      - "3000:3000"
+    environment:
+      - WAHA_PRINT_QR=True
+      - WHATSAPP_API_PORT=3000
+      - WHATSAPP_API_HOSTNAME=0.0.0.0
+      - WHATSAPP_API_KEY=${WAHA_API_KEY_1:-5014d2db2fcf48019e4aee140286480a}
+      - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
+      - WHATSAPP_RESTART_ALL_SESSIONS=True
+      - WHATSAPP_START_SESSIONS=default
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
+      - WHATSAPP_HOOK_URL=http://backend-1:4000/webhook/whatsapp
+      - WHATSAPP_FILES_FOLDER=/app/files
+      - WHATSAPP_FILES_LIFETIME=180
+    volumes:
+      - waha_data_1:/app/.sessions
+      - waha_files_1:/app/files
+    networks:
+      - whatsapp-network-1
+    restart: unless-stopped
+    depends_on:
+      backend-1:
+        condition: service_started
+
+  # Instance 1 - Backend API
+  backend-1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: whatsapp-backend-1
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://whatsapp_user:${POSTGRES_PASSWORD_1:-whatsapp_pass_1}@postgres-1:5432/whatsapp_db_1
+      - REDIS_URL=redis://redis-1:6379
+      - WAHA_URL=http://waha-1:3000
+      - BACKEND_URL=https://api1.watrix.online
+      - GLOBAL_SEND_CONCURRENCY=2
+      - WAHA_API_KEY=${WAHA_API_KEY_1:-5014d2db2fcf48019e4aee140286480a}
+      - PORT=4000
+      - JWT_SECRET=${JWT_SECRET_1:-change-this-secret-1}
+    depends_on:
+      postgres-1:
+        condition: service_healthy
+      redis-1:
+        condition: service_healthy
+      waha-1:
+        condition: service_started
+    networks:
+      - whatsapp-network-1
+    restart: unless-stopped
+
+  # Instance 1 - Frontend
+  frontend-1:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://api1.watrix.online
+    container_name: whatsapp-frontend-1
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NEXT_PUBLIC_API_URL=https://api1.watrix.online
+    depends_on:
+      - backend-1
+    networks:
+      - whatsapp-network-1
+    restart: unless-stopped
+
+# ============================================================================
+# INSTANCE 2 - app2.watrix.online
+# ============================================================================
+
+  # Instance 2 - PostgreSQL
+  postgres-2:
+    image: postgres:15-alpine
+    container_name: whatsapp-postgres-2
+    environment:
+      POSTGRES_USER: whatsapp_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_2:-whatsapp_pass_2}
+      POSTGRES_DB: whatsapp_db_2
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_2:/var/lib/postgresql/data
+    networks:
+      - whatsapp-network-2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whatsapp_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Instance 2 - Redis
+  redis-2:
+    image: redis:7-alpine
+    container_name: whatsapp-redis-2
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data_2:/data
+    networks:
+      - whatsapp-network-2
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Instance 2 - WAHA Plus
+  waha-2:
+    image: devlikeapro/waha-plus:latest
+    container_name: whatsapp-waha-2
+    ports:
+      - "3100:3000"
+    environment:
+      - WAHA_PRINT_QR=True
+      - WHATSAPP_API_PORT=3000
+      - WHATSAPP_API_HOSTNAME=0.0.0.0
+      - WHATSAPP_API_KEY=${WAHA_API_KEY_2:-5014d2db2fcf48019e4aee140286480b}
+      - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
+      - WHATSAPP_RESTART_ALL_SESSIONS=True
+      - WHATSAPP_START_SESSIONS=default
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
+      - WHATSAPP_HOOK_URL=http://backend-2:4000/webhook/whatsapp
+      - WHATSAPP_FILES_FOLDER=/app/files
+      - WHATSAPP_FILES_LIFETIME=180
+    volumes:
+      - waha_data_2:/app/.sessions
+      - waha_files_2:/app/files
+    networks:
+      - whatsapp-network-2
+    restart: unless-stopped
+    depends_on:
+      backend-2:
+        condition: service_started
+
+  # Instance 2 - Backend API
+  backend-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: whatsapp-backend-2
+    ports:
+      - "4001:4000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://whatsapp_user:${POSTGRES_PASSWORD_2:-whatsapp_pass_2}@postgres-2:5432/whatsapp_db_2
+      - REDIS_URL=redis://redis-2:6379
+      - WAHA_URL=http://waha-2:3000
+      - BACKEND_URL=https://api2.watrix.online
+      - GLOBAL_SEND_CONCURRENCY=2
+      - WAHA_API_KEY=${WAHA_API_KEY_2:-5014d2db2fcf48019e4aee140286480b}
+      - PORT=4000
+      - JWT_SECRET=${JWT_SECRET_2:-change-this-secret-2}
+    depends_on:
+      postgres-2:
+        condition: service_healthy
+      redis-2:
+        condition: service_healthy
+      waha-2:
+        condition: service_started
+    networks:
+      - whatsapp-network-2
+    restart: unless-stopped
+
+  # Instance 2 - Frontend
+  frontend-2:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://api2.watrix.online
+    container_name: whatsapp-frontend-2
+    ports:
+      - "3002:3001"
+    environment:
+      - PORT=3001
+      - NEXT_PUBLIC_API_URL=https://api2.watrix.online
+    depends_on:
+      - backend-2
+    networks:
+      - whatsapp-network-2
+    restart: unless-stopped
+
+# ============================================================================
+# NOTE: Instance 3-10 akan mengikuti pola yang sama
+# Disarankan menggunakan generate-instances.sh untuk generate semua instances
+# ============================================================================
+
+networks:
+  whatsapp-network-1:
+    driver: bridge
+    name: whatsapp-network-1
+  whatsapp-network-2:
+    driver: bridge
+    name: whatsapp-network-2
+
+volumes:
+  postgres_data_1:
+    name: postgres_data_1
+  redis_data_1:
+    name: redis_data_1
+  waha_data_1:
+    name: waha_data_1
+  waha_files_1:
+    name: waha_files_1
+  postgres_data_2:
+    name: postgres_data_2
+  redis_data_2:
+    name: redis_data_2
+  waha_data_2:
+    name: waha_data_2
+  waha_files_2:
+    name: waha_files_2
