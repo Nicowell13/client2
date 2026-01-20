@@ -13,7 +13,7 @@ TEMPLATE_FILE="docker-compose.template.yml"
 
 echo "🚀 Generating docker-compose.yml for 10 instances..."
 
-for i in {1..10}; do
+for i in {1..4}; do
     INSTANCE_DIR="$INSTANCE_BASE_DIR/instance-$i"
     mkdir -p "$INSTANCE_DIR"
     
@@ -92,7 +92,7 @@ echo ""
 echo "📋 Port Summary:"
 echo "Instance | PostgreSQL | Redis | WAHA  | Backend | Frontend | Domain"
 echo "---------|------------|-------|-------|---------|----------|----------------"
-for i in {1..10}; do
+for i in {1..4}; do
     POSTGRES_PORT=$((5431 + i))
     REDIS_PORT=$((6378 + i))
     WAHA_PORT=$((2999 + i * 100))
