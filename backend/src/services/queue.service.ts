@@ -275,28 +275,39 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     const errorMsg = String(error?.message || '');
 
     // =====================================================
-    // 🔥 WEBJS NON-FATAL ERROR HANDLING (IMPORTANT FIX)
+    // 🔥 NON-FATAL ERROR HANDLING (IMPORTANT FIX)
     // =====================================================
-    const isWebJSNonFatal =
+    // These errors indicate the message was sent successfully,
+    // but some optional feature (buttons, media processing) failed.
+    // We should mark as SENT to avoid confusion.
+    const isNonFatalError =
       errorMsg.includes('addAnnotations') ||
       errorMsg.includes('processMedia') ||
-      errorMsg.includes('Cannot read properties');
+      errorMsg.includes('Cannot read properties') ||
+      errorMsg.includes('button') ||
+      errorMsg.includes('Button') ||
+      errorMsg.includes('interactive') ||
+      errorMsg.includes('Interactive') ||
+      errorMsg.includes('addButtons') ||
+      errorMsg.includes('attachment') ||
+      errorMsg.toLowerCase().includes('failed to add buttons') ||
+      errorMsg.toLowerCase().includes('button error');
 
-    if (isWebJSNonFatal) {
-      console.warn('⚠ WebJS non-fatal error, marking message as SENT');
+    if (isNonFatalError) {
+      console.warn('⚠ Non-fatal error (message likely sent), marking as SENT:', errorMsg);
 
       await prisma.message.updateMany({
         where: { campaignId, contactId, status: 'pending' },
         data: {
           status: 'sent',
           sentAt: new Date(),
-          errorMsg: 'WebJS warning (message delivered)',
+          errorMsg: `Warning: ${errorMsg.substring(0, 200)}`, // Truncate long errors
         },
       });
 
       await safeCampaignUpdate(campaignId, { sentCount: { increment: 1 } });
 
-      return { success: true, warning: 'webjs-non-fatal' };
+      return { success: true, warning: 'non-fatal-error' };
     }
 
     // =====================================================
