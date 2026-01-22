@@ -19,7 +19,8 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('https://api.watrix.online/api/auth/login', {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.watrix.online';
+      const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

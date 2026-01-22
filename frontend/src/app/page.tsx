@@ -7,16 +7,18 @@ import Sidebar from '@/components/Sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { campaignAPI, contactAPI, sessionAPI } from '@/lib/api-client';
-import { 
-  Users, 
-  MessageSquare, 
-  Send, 
-  CheckCircle, 
+import {
+  Users,
+  MessageSquare,
+  Send,
+  CheckCircle,
   XCircle,
   Activity,
   TrendingUp,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Zap,
+  BarChart3
 } from 'lucide-react';
 
 interface Stats {
@@ -54,7 +56,6 @@ export default function Home() {
 
   const fetchStats = async () => {
     try {
-      // Contacts: use pagination.total to avoid fetching everything
       const contactsResp = await contactAPI.getAll({ page: 1, limit: 1 });
       const contactsPayload = contactsResp.data;
       const totalContacts =
@@ -105,160 +106,244 @@ export default function Home() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    router.push('/login');
-  };
-
   if (isLoading) {
     return (
-      <div className="flex h-screen">
+      <div className="flex h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
         <Sidebar user={user} />
         <div className="flex-1 lg:ml-64 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
+            <p className="text-gray-600 font-medium">Loading dashboard...</p>
+          </div>
         </div>
       </div>
     );
   }
 
+  const successRate = stats.sentMessages + stats.failedMessages > 0
+    ? ((stats.sentMessages / (stats.sentMessages + stats.failedMessages)) * 100).toFixed(1)
+    : '0';
+
   const statCards = [
     {
-      title: 'Total Contacts',
+      title: 'Contacts',
       value: stats.totalContacts.toLocaleString(),
       icon: Users,
-      colors: { bg: 'bg-blue-100', icon: 'text-blue-600' },
-      change: '+12%',
+      gradient: 'from-blue-500 to-blue-600',
+      bgGradient: 'from-blue-50 to-blue-100',
       href: '/contacts',
     },
     {
-      title: 'Total Campaigns',
+      title: 'Campaigns',
       value: stats.totalCampaigns.toLocaleString(),
       icon: MessageSquare,
-      colors: { bg: 'bg-purple-100', icon: 'text-purple-600' },
-      change: '+8%',
+      gradient: 'from-purple-500 to-purple-600',
+      bgGradient: 'from-purple-50 to-purple-100',
       href: '/campaigns',
     },
     {
       title: 'Messages Sent',
       value: stats.sentMessages.toLocaleString(),
       icon: Send,
-      colors: { bg: 'bg-green-100', icon: 'text-green-600' },
-      change: '+23%',
+      gradient: 'from-green-500 to-green-600',
+      bgGradient: 'from-green-50 to-green-100',
       href: '/messages',
     },
     {
       title: 'Active Sessions',
       value: stats.activeSessions.toLocaleString(),
       icon: Activity,
-      colors: { bg: 'bg-orange-100', icon: 'text-orange-600' },
-      change: stats.activeSessions > 0 ? 'Online' : 'Offline',
+      gradient: 'from-orange-500 to-orange-600',
+      bgGradient: 'from-orange-50 to-orange-100',
       href: '/sessions',
+      badge: stats.activeSessions > 0 ? 'Online' : 'Offline',
+      badgeColor: stats.activeSessions > 0 ? 'bg-green-500' : 'bg-gray-400',
     },
   ];
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <Sidebar user={user} />
-      
+
       <div className="flex-1 lg:ml-64 overflow-auto">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
-          <div className="px-4 sm:px-6 lg:px-8 py-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-              <p className="text-sm text-gray-500">Welcome back, {user?.name}! Here&apos;s what&apos;s happening today.</p>
+        {/* Modern Header */}
+        <header className="bg-white/80 backdrop-blur-lg border-b border-gray-200/50 sticky top-0 z-10 shadow-sm">
+          <div className="px-4 sm:px-6 lg:px-8 py-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                  Dashboard
+                </h1>
+                <p className="text-sm text-gray-600 mt-1">Welcome back, {user?.name}!</p>
+              </div>
+              <div className="hidden md:flex items-center gap-4">
+                <div className="flex items-center gap-2 px-4 py-2 bg-green-50 rounded-full">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-medium text-green-700">System Active</span>
+                </div>
+              </div>
             </div>
           </div>
         </header>
 
         <main className="px-4 sm:px-6 lg:px-8 py-8">
-          {/* Stats Grid */}
+          {/* Stats Grid - Modern Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             {statCards.map((stat, index) => {
               const Icon = stat.icon;
               return (
                 <Link key={index} href={stat.href}>
-                  <Card variant="elevated" className="hover:shadow-xl transition-all cursor-pointer group">
-                    <CardContent className="p-6">
+                  <div className="group relative overflow-hidden rounded-2xl bg-white shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100">
+                    {/* Gradient Background */}
+                    <div className={`absolute inset-0 bg-gradient-to-br ${stat.bgGradient} opacity-50 group-hover:opacity-70 transition-opacity`}></div>
+
+                    {/* Content */}
+                    <div className="relative p-6">
                       <div className="flex items-start justify-between mb-4">
-                        <div className={`p-3 rounded-xl ${stat.colors.bg}`}>
-                          <Icon className={`w-6 h-6 ${stat.colors.icon}`} />
+                        <div className={`p-3 rounded-xl bg-gradient-to-br ${stat.gradient} shadow-lg`}>
+                          <Icon className="w-6 h-6 text-white" />
                         </div>
-                        <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-blue-600 transition-colors" />
+                        {stat.badge && (
+                          <span className={`px-3 py-1 ${stat.badgeColor} text-white text-xs font-semibold rounded-full`}>
+                            {stat.badge}
+                          </span>
+                        )}
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-600 mb-1">{stat.title}</p>
-                        <p className="text-3xl font-bold text-gray-900 mb-2">{stat.value}</p>
-                        <div className="flex items-center gap-2">
-                          <TrendingUp className="w-4 h-4 text-green-600" />
-                          <span className="text-sm text-green-600 font-medium">{stat.change}</span>
-                        </div>
+                        <p className="text-4xl font-bold text-gray-900">{stat.value}</p>
                       </div>
-                    </CardContent>
-                  </Card>
+
+                      {/* Hover Arrow */}
+                      <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ArrowRight className="w-5 h-5 text-gray-400" />
+                      </div>
+                    </div>
+                  </div>
                 </Link>
               );
             })}
           </div>
 
-          {/* Quick Actions */}
+          {/* Success Rate Card */}
+          {(stats.sentMessages > 0 || stats.failedMessages > 0) && (
+            <div className="mb-8">
+              <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <BarChart3 className="w-5 h-5" />
+                      <p className="text-sm font-medium opacity-90">Success Rate</p>
+                    </div>
+                    <p className="text-5xl font-bold">{successRate}%</p>
+                    <p className="text-sm opacity-75 mt-2">
+                      {stats.sentMessages} sent · {stats.failedMessages} failed
+                    </p>
+                  </div>
+                  <div className="hidden md:block">
+                    <div className="w-32 h-32 relative">
+                      <svg className="transform -rotate-90 w-32 h-32">
+                        <circle
+                          cx="64"
+                          cy="64"
+                          r="56"
+                          stroke="rgba(255,255,255,0.2)"
+                          strokeWidth="12"
+                          fill="none"
+                        />
+                        <circle
+                          cx="64"
+                          cy="64"
+                          r="56"
+                          stroke="white"
+                          strokeWidth="12"
+                          fill="none"
+                          strokeDasharray={`${(parseFloat(successRate) / 100) * 351.86} 351.86`}
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <TrendingUp className="w-8 h-8" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Actions & Activity */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card variant="bordered">
+            {/* Quick Actions */}
+            <Card variant="bordered" className="shadow-lg">
               <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-                <CardDescription>Common tasks to get you started</CardDescription>
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-blue-600" />
+                  <CardTitle>Quick Actions</CardTitle>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <Link href="/sessions">
-                  <Button variant="outline" className="w-full justify-start" size="lg">
-                    <Activity className="w-5 h-5 mr-2" />
-                    Manage WhatsApp Sessions
+                  <Button variant="outline" className="w-full justify-start group hover:bg-blue-50 hover:border-blue-300 transition-all" size="lg">
+                    <Activity className="w-5 h-5 mr-3 text-blue-600" />
+                    <span className="flex-1 text-left">Manage Sessions</span>
+                    <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
                   </Button>
                 </Link>
                 <Link href="/contacts">
-                  <Button variant="outline" className="w-full justify-start" size="lg">
-                    <Users className="w-5 h-5 mr-2" />
-                    Upload Contacts
+                  <Button variant="outline" className="w-full justify-start group hover:bg-purple-50 hover:border-purple-300 transition-all" size="lg">
+                    <Users className="w-5 h-5 mr-3 text-purple-600" />
+                    <span className="flex-1 text-left">Upload Contacts</span>
+                    <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-purple-600 group-hover:translate-x-1 transition-all" />
                   </Button>
                 </Link>
                 <Link href="/campaigns">
-                  <Button variant="primary" className="w-full justify-start" size="lg">
-                    <MessageSquare className="w-5 h-5 mr-2" />
-                    Create New Campaign
+                  <Button className="w-full justify-start bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 group shadow-lg" size="lg">
+                    <MessageSquare className="w-5 h-5 mr-3" />
+                    <span className="flex-1 text-left">Create Campaign</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-all" />
                   </Button>
                 </Link>
               </CardContent>
             </Card>
 
-            <Card variant="bordered">
+            {/* Activity Summary */}
+            <Card variant="bordered" className="shadow-lg">
               <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-                <CardDescription>Latest campaign updates</CardDescription>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-purple-600" />
+                  <CardTitle>Activity</CardTitle>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {stats.totalCampaigns === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <Clock className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                      <p>No campaigns yet</p>
-                      <p className="text-sm">Create your first campaign to get started</p>
+                    <div className="text-center py-12">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Clock className="w-8 h-8 text-gray-400" />
+                      </div>
+                      <p className="text-gray-600 font-medium mb-1">No campaigns yet</p>
+                      <p className="text-sm text-gray-500">Create your first campaign to get started</p>
                     </div>
                   ) : (
                     <>
-                      <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
-                        <CheckCircle className="w-5 h-5 text-green-600" />
+                      <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
+                        <div className="p-2 bg-green-500 rounded-lg">
+                          <CheckCircle className="w-5 h-5 text-white" />
+                        </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900">Messages Sent</p>
-                          <p className="text-xs text-gray-600">{stats.sentMessages} messages delivered successfully</p>
+                          <p className="text-sm font-semibold text-gray-900">Messages Delivered</p>
+                          <p className="text-2xl font-bold text-green-600">{stats.sentMessages.toLocaleString()}</p>
                         </div>
                       </div>
                       {stats.failedMessages > 0 && (
-                        <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg">
-                          <XCircle className="w-5 h-5 text-red-600" />
+                        <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-red-50 to-rose-50 rounded-xl border border-red-200">
+                          <div className="p-2 bg-red-500 rounded-lg">
+                            <XCircle className="w-5 h-5 text-white" />
+                          </div>
                           <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900">Failed Messages</p>
-                            <p className="text-xs text-gray-600">{stats.failedMessages} messages failed to send</p>
+                            <p className="text-sm font-semibold text-gray-900">Failed Messages</p>
+                            <p className="text-2xl font-bold text-red-600">{stats.failedMessages.toLocaleString()}</p>
                           </div>
                         </div>
                       )}
