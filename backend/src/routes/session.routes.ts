@@ -5,7 +5,7 @@ import wahaService from '../services/waha.service';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
-const MAX_SESSIONS = 5;
+const MAX_SESSIONS = 10;
 
 // Protect all session routes
 router.use(authMiddleware);
@@ -71,9 +71,8 @@ router.post('/', async (req: Request, res: Response) => {
 
       return res.status(500).json({
         success: false,
-        message: `Failed to start WhatsApp session: ${
-          wahaError?.message || 'Unknown error'
-        }. Session saved for manual retry.`,
+        message: `Failed to start WhatsApp session: ${wahaError?.message || 'Unknown error'
+          }. Session saved for manual retry.`,
         data: session,
       });
     }
