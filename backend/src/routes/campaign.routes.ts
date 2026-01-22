@@ -6,6 +6,7 @@ import wahaService from '../services/waha.service';
 import { getCampaignQueue } from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
 import { executeAutoCampaigns } from '../services/auto-campaign.service';
+import { recoverFailedCampaigns } from '../services/campaign-recovery.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -19,8 +20,8 @@ router.post('/', async (req: Request, res: Response) => {
 
     const cleanedMessages: string[] = Array.isArray(messages)
       ? messages
-          .map((m: any) => String(m ?? '').trim())
-          .filter((m: string) => m.length > 0)
+        .map((m: any) => String(m ?? '').trim())
+        .filter((m: string) => m.length > 0)
       : [];
 
     const legacyMessage = String(message ?? '').trim();
@@ -362,6 +363,33 @@ router.post('/auto-execute', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'Failed to execute auto campaigns',
+    });
+  }
+});
+
+/* ===========================================================
+ RECOVER FAILED CAMPAIGNS (REASSIGN TO ACTIVE SESSIONS)
+=========================================================== */
+router.post('/recover', async (_req: Request, res: Response) => {
+  try {
+    const result = await recoverFailedCampaigns();
+
+    return res.json({
+      success: result.success,
+      message: result.success
+        ? `Recovered ${result.campaignsRecovered} campaigns, reassigned ${result.messagesReassigned} messages`
+        : 'Recovery failed - no active sessions available',
+      data: {
+        campaignsRecovered: result.campaignsRecovered,
+        messagesReassigned: result.messagesReassigned,
+        details: result.details,
+      },
+    });
+  } catch (error: any) {
+    console.error('[CAMPAIGN][RECOVER]', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to recover campaigns',
     });
   }
 });

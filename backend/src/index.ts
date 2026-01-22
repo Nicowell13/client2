@@ -14,6 +14,9 @@ import uploadRoutes from './routes/upload.routes';
 // Middleware
 import { errorHandler } from './middleware/errorHandler';
 
+// Services
+import { scheduleAutoRecovery } from './services/campaign-recovery.service';
+
 dotenv.config();
 
 const app: Express = express();
@@ -61,6 +64,10 @@ app.listen(PORT, () => {
   console.log(`⚡️ [server] Backend running at http://localhost:${PORT}`);
   console.log(`🌐 Using WAHA_URL = ${process.env.WAHA_URL}`);
   console.log(`🔑 API Key set: ${!!process.env.WAHA_API_KEY}`);
+
+  // Start auto-recovery scheduler (runs every 5 minutes)
+  console.log('🔄 Starting campaign auto-recovery scheduler...');
+  scheduleAutoRecovery(300000); // 5 minutes = 300000ms
 });
 
 export default app;

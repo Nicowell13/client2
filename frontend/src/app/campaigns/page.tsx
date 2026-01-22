@@ -35,6 +35,10 @@ export default function CampaignsPage() {
     button2Url: "",
   });
 
+  // ⭐ NEW: Multi-session support
+  const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
+  const [useAllSessions, setUseAllSessions] = useState(false);
+
   // Image upload state
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
@@ -93,12 +97,12 @@ export default function CampaignsPage() {
     try {
       const res = await uploadAPI.uploadImage(file);
       const imageUrl = res.data?.data?.url;
-      
+
       if (imageUrl) {
         // Get full URL (relative path from backend)
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.watrix.online';
         const fullImageUrl = imageUrl.startsWith('http') ? imageUrl : `${API_BASE_URL}${imageUrl}`;
-        
+
         setNewCampaign({ ...newCampaign, imageUrl: fullImageUrl });
         setUploadedImagePreview(fullImageUrl);
         toast.success('Image uploaded successfully');
@@ -121,7 +125,28 @@ export default function CampaignsPage() {
     if (filteredMessages.length === 0)
       return toast.error("Please add at least 1 message variant");
 
-    const buttons = [];
+    // ⭐ Determine which sessions to use
+    let targetSessions: string[] = [];
+    if (useAllSessions) {
+      // Use all active sessions
+      const activeSessions = sessions.filter((s) =>
+        ['working', 'ready', 'authenticated'].includes(s.status.toLowerCase())
+      );
+      if (activeSessions.length === 0) {
+        return toast.error("No active sessions available");
+      }
+      targetSessions = activeSessions.map((s) => s.id);
+    } else if (selectedSessions.length > 0) {
+      // Use selected sessions
+      targetSessions = selectedSessions;
+    } else if (newCampaign.sessionId) {
+      // Fallback to single session (backward compatibility)
+      targetSessions = [newCampaign.sessionId];
+    } else {
+      return toast.error("Please select at least one session");
+    }
+
+    const buttons: Array<{ label: string; url: string }> = [];
     if (newCampaign.button1Label && newCampaign.button1Url)
       buttons.push({ label: newCampaign.button1Label, url: newCampaign.button1Url });
 
@@ -129,15 +154,24 @@ export default function CampaignsPage() {
       buttons.push({ label: newCampaign.button2Label, url: newCampaign.button2Url });
 
     try {
-      await campaignAPI.create({
-        name: newCampaign.name,
-        messages: filteredMessages, // ⭐ NEW FIELD
-        imageUrl: newCampaign.imageUrl || null,
-        sessionId: newCampaign.sessionId,
-        buttons,
-      });
+      // Create campaign for each selected session
+      const createPromises = targetSessions.map((sessionId, index) =>
+        campaignAPI.create({
+          name: `${newCampaign.name}${targetSessions.length > 1 ? ` (${index + 1}/${targetSessions.length})` : ''}`,
+          messages: filteredMessages,
+          imageUrl: newCampaign.imageUrl || null,
+          sessionId: sessionId,
+          buttons,
+        })
+      );
 
-      toast.success("Campaign created");
+      await Promise.all(createPromises);
+
+      toast.success(
+        targetSessions.length > 1
+          ? `${targetSessions.length} campaigns created for selected sessions`
+          : "Campaign created"
+      );
 
       // Reset UI
       setMessages([""]);
@@ -150,6 +184,8 @@ export default function CampaignsPage() {
         button2Label: "",
         button2Url: "",
       });
+      setSelectedSessions([]);
+      setUseAllSessions(false);
       setUploadedImagePreview(null);
       setShowCreateForm(false);
       fetchCampaigns();
@@ -196,7 +232,7 @@ export default function CampaignsPage() {
   ======================================================= */
   const autoExecuteCampaigns = async () => {
     const draftCampaigns = campaigns.filter((c) => c.status === 'draft');
-    
+
     if (draftCampaigns.length === 0) {
       toast.error('Tidak ada campaign draft untuk dieksekusi');
       return;
@@ -207,7 +243,7 @@ export default function CampaignsPage() {
       return;
     }
 
-    const activeSessions = sessions.filter((s) => 
+    const activeSessions = sessions.filter((s) =>
       ['working', 'ready', 'authenticated'].includes(s.status.toLowerCase())
     );
 
@@ -226,18 +262,18 @@ export default function CampaignsPage() {
     try {
       const delayMs = delayBetweenCampaigns * 1000;
       const res = await campaignAPI.autoExecute(delayMs);
-      
+
       if (res.data?.success) {
         toast.success(
           `Berhasil memproses ${res.data.data?.campaignsProcessed || 0} campaign`
         );
-        
+
         // Show results
         if (res.data.data?.results) {
           const results = res.data.data.results;
           const successCount = results.filter((r: any) => r.success).length;
           const failedCount = results.filter((r: any) => !r.success).length;
-          
+
           if (failedCount > 0) {
             toast.error(`${failedCount} campaign gagal. ${successCount} berhasil.`);
           }
@@ -245,7 +281,7 @@ export default function CampaignsPage() {
       } else {
         toast.error(res.data?.message || 'Gagal mengeksekusi campaign');
       }
-      
+
       fetchCampaigns();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Gagal mengeksekusi campaign');
@@ -368,7 +404,7 @@ export default function CampaignsPage() {
               {/* IMAGE UPLOAD / URL */}
               <div>
                 <label className="block mb-1 font-medium">Image (optional)</label>
-                
+
                 {/* Upload Button */}
                 <div className="mb-2">
                   <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700">
@@ -423,24 +459,96 @@ export default function CampaignsPage() {
                 />
               </div>
 
-              {/* SESSION */}
+              {/* SESSION SELECTION - MULTI-SELECT */}
               <div>
-                <label className="block mb-1 font-medium">Session</label>
-                <select
-                  required
-                  className="w-full border px-3 py-2 rounded-lg"
-                  value={newCampaign.sessionId}
-                  onChange={(e) =>
-                    setNewCampaign({ ...newCampaign, sessionId: e.target.value })
-                  }
-                >
-                  <option value="">Select Session</option>
-                  {sessions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.status})
-                    </option>
-                  ))}
-                </select>
+                <label className="block mb-2 font-medium">Target Sessions</label>
+
+                {/* All Sessions Toggle */}
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useAllSessions}
+                      onChange={(e) => {
+                        setUseAllSessions(e.target.checked);
+                        if (e.target.checked) {
+                          setSelectedSessions([]);
+                          setNewCampaign({ ...newCampaign, sessionId: "" });
+                        }
+                      }}
+                      className="w-4 h-4"
+                    />
+                    <span className="font-medium text-blue-900">
+                      🌐 Use All Active Sessions
+                    </span>
+                  </label>
+                  <p className="text-xs text-blue-700 mt-1 ml-6">
+                    Campaign akan dibuat untuk semua session yang aktif
+                  </p>
+                </div>
+
+                {/* Manual Session Selection */}
+                {!useAllSessions && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-600 mb-2">
+                      Pilih session (bisa lebih dari 1):
+                    </p>
+                    <div className="max-h-48 overflow-y-auto border rounded-lg p-3 space-y-2">
+                      {sessions.map((s) => (
+                        <label
+                          key={s.id}
+                          className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedSessions.includes(s.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedSessions([...selectedSessions, s.id]);
+                              } else {
+                                setSelectedSessions(
+                                  selectedSessions.filter((id) => id !== s.id)
+                                );
+                              }
+                            }}
+                            className="w-4 h-4"
+                          />
+                          <span className="flex-1">
+                            {s.name}
+                            <span
+                              className={`ml-2 text-xs px-2 py-0.5 rounded ${['working', 'ready', 'authenticated'].includes(
+                                s.status.toLowerCase()
+                              )
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-600'
+                                }`}
+                            >
+                              {s.status}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {selectedSessions.length > 0 && (
+                      <p className="text-sm text-green-600 mt-2">
+                        ✓ {selectedSessions.length} session dipilih
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Active Sessions Count */}
+                {useAllSessions && (
+                  <p className="text-sm text-blue-600 mt-2">
+                    ✓ Akan dibuat untuk{' '}
+                    {sessions.filter((s) =>
+                      ['working', 'ready', 'authenticated'].includes(
+                        s.status.toLowerCase()
+                      )
+                    ).length}{' '}
+                    session aktif
+                  </p>
+                )}
               </div>
 
               {/* BUTTONS */}

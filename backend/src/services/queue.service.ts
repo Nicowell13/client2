@@ -4,8 +4,9 @@ import wahaService from './waha.service';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-const DEFAULT_QUEUE_NAME = 'campaign-messages';
-const sessionQueues = new Map<string, Bull.Queue<CampaignJob>>();
+// ⭐ SINGLE GLOBAL QUEUE for all sessions (safer from WhatsApp bans)
+const GLOBAL_QUEUE_NAME = 'campaign-messages-global';
+let globalQueue: Bull.Queue<CampaignJob> | null = null;
 
 const GLOBAL_SEND_CONCURRENCY = Number(process.env.GLOBAL_SEND_CONCURRENCY || 0);
 const GLOBAL_SEND_KEY = process.env.GLOBAL_SEND_KEY || 'campaign:global_send_active';
@@ -105,9 +106,8 @@ function sanitizeQueueSegment(sessionName: string): string {
 }
 
 function buildQueueName(sessionName: string): string {
-  const normalized = normalizeSessionName(sessionName);
-  if (normalized === 'default') return DEFAULT_QUEUE_NAME;
-  return `${DEFAULT_QUEUE_NAME}:${sanitizeQueueSegment(normalized)}`;
+  // ⭐ Always use global queue (single worker for all sessions)
+  return GLOBAL_QUEUE_NAME;
 }
 
 async function getRedisClient(): Promise<any> {
@@ -211,20 +211,20 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     try {
       const sessionStatus = await wahaService.getSessionStatus(sessionName);
       const normalizedStatus = (sessionStatus?.status || '').toLowerCase();
-      
+
       if (!['working', 'ready', 'authenticated'].includes(normalizedStatus)) {
         // Update session status in DB
         const session = await prisma.session.findFirst({
           where: { sessionId: sessionName },
         });
-        
+
         if (session) {
           await prisma.session.update({
             where: { id: session.id },
             data: { status: normalizedStatus || 'stopped' },
           });
         }
-        
+
         throw new Error(`Session ${sessionName} is not active. Status: ${normalizedStatus}`);
       }
     } catch (statusError: any) {
@@ -312,13 +312,13 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
     if (isSessionError) {
       console.error(`❌ Session error detected for ${sessionName}:`, errorMsg);
-      
+
       // Update session status to stopped/logged out
       try {
         const session = await prisma.session.findFirst({
           where: { sessionId: sessionName },
         });
-        
+
         if (session) {
           await prisma.session.update({
             where: { id: session.id },
@@ -385,15 +385,14 @@ function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
 }
 
 // ===============================
-// QUEUE FACTORY (ONE QUEUE/WORKER PER SESSION)
+// GLOBAL QUEUE FACTORY (SINGLE WORKER FOR ALL SESSIONS)
 // ===============================
 export function getCampaignQueue(sessionName: string) {
-  const normalized = normalizeSessionName(sessionName);
-  const existing = sessionQueues.get(normalized);
-  if (existing) return existing;
+  // ⭐ Return existing global queue if already created
+  if (globalQueue) return globalQueue;
 
-  const queueName = buildQueueName(normalized);
-  const queue = new Bull<CampaignJob>(queueName, REDIS_URL, {
+  // ⭐ Create single global queue for ALL sessions
+  globalQueue = new Bull<CampaignJob>(GLOBAL_QUEUE_NAME, REDIS_URL, {
     defaultJobOptions: {
       removeOnComplete: true,
       removeOnFail: false,
@@ -402,9 +401,11 @@ export function getCampaignQueue(sessionName: string) {
     },
   });
 
-  attachQueueHandlers(queue);
-  sessionQueues.set(normalized, queue);
-  return queue;
+  attachQueueHandlers(globalQueue);
+
+  console.log('✅ [QUEUE] Single global worker initialized for all sessions');
+
+  return globalQueue;
 }
 
 // Backward compatibility: keep the original default export.

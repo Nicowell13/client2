@@ -26,7 +26,7 @@ interface Session {
 
 export default function SessionsPage() {
   const router = useRouter();
-  const MAX_SESSIONS = 5;
+  const MAX_SESSIONS = 10;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
