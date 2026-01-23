@@ -95,8 +95,7 @@ class WahaService {
       }
 
       throw new Error(
-        `WAHA stop failed (status ${last?.status ?? 'unknown'}): ${
-          typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
+        `WAHA stop failed (status ${last?.status ?? 'unknown'}): ${typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
         }`
       );
     } catch (error: any) {
@@ -121,8 +120,7 @@ class WahaService {
       }
 
       throw new Error(
-        `WAHA logout failed (status ${last?.status ?? 'unknown'}): ${
-          typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
+        `WAHA logout failed (status ${last?.status ?? 'unknown'}): ${typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
         }`
       );
     } catch (error: any) {
@@ -148,8 +146,7 @@ class WahaService {
       }
 
       throw new Error(
-        `WAHA delete failed (status ${last?.status ?? 'unknown'}): ${
-          typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
+        `WAHA delete failed (status ${last?.status ?? 'unknown'}): ${typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
         }`
       );
     } catch (error: any) {
@@ -371,11 +368,17 @@ class WahaService {
     buttons: Array<{ label: string; url: string }>
   ) {
     try {
-      let fullMessage = message + '\n\n';
+      let fullMessage = message;
 
-      buttons.forEach((btn, index) => {
-        fullMessage += `${index + 1}. ${btn.label}: ${btn.url}\n`;
-      });
+      // Add buttons/URLs with proper formatting for WhatsApp clickable links
+      if (buttons.length > 0) {
+        fullMessage += '\n\n';
+        buttons.forEach((btn, index) => {
+          // Format: Label on one line, URL on the next line with proper spacing
+          // This ensures WhatsApp detects and makes the URL clickable
+          fullMessage += `${index + 1}. ${btn.label}\n${btn.url}\n\n`;
+        });
+      }
 
       if (imageUrl) {
         return await this.sendImageMessage(sessionName, phoneNumber, imageUrl, fullMessage);
