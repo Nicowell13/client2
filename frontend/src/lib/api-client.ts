@@ -74,6 +74,13 @@ export const sessionAPI = {
 
   requestPairingCode: (sessionId: string, phoneNumber: string) =>
     api.post(`/api/sessions/${sessionId}/request-code`, { phoneNumber }),
+
+  // Reset job count untuk session (mengembalikan session dari resting)
+  resetJobs: (sessionId: string) =>
+    api.post(`/api/sessions/${sessionId}/reset-jobs`),
+
+  // Retry semua pesan dengan status 'waiting'
+  retryWaiting: () => api.post('/api/sessions/retry-waiting'),
 };
 
 // =========================
@@ -139,7 +146,7 @@ export const campaignAPI = {
 // =========================
 export const messageAPI = {
   getAll: () => api.get('/api/campaigns/messages/all'),
-  
+
   getByCampaign: (campaignId: string) =>
     api.get(`/api/campaigns/${campaignId}/messages`),
 };

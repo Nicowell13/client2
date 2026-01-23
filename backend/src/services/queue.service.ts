@@ -1,6 +1,7 @@
 import Bull from 'bull';
 import prisma from '../lib/prisma';
 import wahaService from './waha.service';
+import sessionRotation from './session-rotation.service';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -270,6 +271,18 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
     await safeCampaignUpdate(campaignId, { sentCount: { increment: 1 } });
 
+    // ------------------------------------
+    // INCREMENT SESSION JOB COUNT
+    // ------------------------------------
+    try {
+      const limitReached = await sessionRotation.incrementJobCount(sessionName);
+      if (limitReached) {
+        console.log(`🛑 Session ${sessionName} reached job limit, will rest`);
+      }
+    } catch (jobCountError: any) {
+      console.warn(`⚠ Failed to increment job count:`, jobCountError.message);
+    }
+
     return { success: true, messageId: waMessageId };
   } catch (error: any) {
     const errorMsg = String(error?.message || '');
@@ -326,24 +339,32 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
       // Update session status to stopped/logged out
       try {
-        const session = await prisma.session.findFirst({
-          where: { sessionId: sessionName },
-        });
-
-        if (session) {
-          await prisma.session.update({
-            where: { id: session.id },
-            data: { status: 'stopped' },
-          });
-          console.log(`⚠ Updated session ${sessionName} status to stopped`);
-        }
+        await sessionRotation.markSessionUnavailable(sessionName);
       } catch (updateError: any) {
-        console.warn('⚠ Failed to update session status:', updateError.message);
+        console.warn('⚠ Failed to mark session unavailable:', updateError.message);
       }
+
+      // =====================================================
+      // MARK AS WAITING (FOR RETRY WITH OTHER SESSION)
+      // =====================================================
+      // Jika error karena session logout/suspend, jangan mark sebagai failed
+      // tapi sebagai 'waiting' supaya bisa di-retry dengan session lain
+      console.log(`⏳ Marking message as 'waiting' for retry with another session`);
+
+      await prisma.message.updateMany({
+        where: { campaignId, contactId, status: 'pending' },
+        data: {
+          status: 'waiting',
+          errorMsg: `Session unavailable, waiting for retry: ${errorMsg.substring(0, 100)}`,
+        },
+      });
+
+      // Jangan increment failedCount karena akan di-retry
+      return { success: false, waiting: true, reason: 'session-unavailable' };
     }
 
     // =====================================================
-    // REAL FAILURE
+    // REAL FAILURE (non-session error)
     // =====================================================
     console.error('❌ Message sending failed:', errorMsg);
 

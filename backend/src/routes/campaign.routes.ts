@@ -7,6 +7,7 @@ import { getCampaignQueue } from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
 import { executeAutoCampaigns } from '../services/auto-campaign.service';
 import { recoverFailedCampaigns } from '../services/campaign-recovery.service';
+import sessionRotation from '../services/session-rotation.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -183,6 +184,36 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     }
 
     /* ---------------------------
+       SMART SESSION SELECTION
+       Jika session pilihan user sudah mencapai limit atau sedang istirahat,
+       cari session alternatif yang masih available
+    ---------------------------- */
+    let activeSession = session;
+    const sessionData = await prisma.session.findFirst({
+      where: { id: session.id }
+    });
+
+    // Cek apakah session sudah limit atau sedang resting
+    const isResting = (sessionData as any)?.jobLimitReached ||
+      ((sessionData as any)?.restingUntil && new Date((sessionData as any).restingUntil) > new Date());
+
+    if (isResting) {
+      console.log(`[CAMPAIGN] Session ${session.name} sedang istirahat, mencari alternatif...`);
+
+      const alternativeSession = await sessionRotation.getBestAvailableSession([session.id]);
+
+      if (!alternativeSession) {
+        return res.status(400).json({
+          success: false,
+          message: 'Semua session sedang istirahat atau tidak tersedia. Coba lagi nanti.',
+        });
+      }
+
+      activeSession = alternativeSession;
+      console.log(`[CAMPAIGN] Menggunakan session alternatif: ${activeSession.name}`);
+    }
+
+    /* ---------------------------
        GET CONTACTS
     ---------------------------- */
     const where =
@@ -236,7 +267,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     }));
 
     // One queue/worker per session for parallel sending across sessions
-    const campaignQueue = getCampaignQueue(campaign.session.sessionId);
+    // Gunakan activeSession (hasil smart selection) bukan campaign.session
+    const campaignQueue = getCampaignQueue(activeSession.sessionId);
 
     for (let b = 0; b < batches.length; b++) {
       const batch = batches[b];
@@ -255,7 +287,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           message: selectedMessage,
           imageUrl: campaign.imageUrl,
           buttons: btns,
-          sessionName: campaign.session.sessionId, // WAHA SESSION NAME
+          sessionName: activeSession.sessionId, // WAHA SESSION NAME (dari smart selection)
           messageIndex: i,
           batchIndex: b,
         });

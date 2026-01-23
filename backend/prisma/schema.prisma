@@ -39,6 +39,12 @@ model Session {
   phoneNumber String?
   isDefault   Boolean    @default(true)
 
+  // Job tracking untuk anti-suspend
+  jobCount         Int       @default(0)      // Jumlah job yang sudah dikerjakan
+  jobLimitReached  Boolean   @default(false)  // Flag jika sudah mencapai limit
+  lastJobAt        DateTime?                  // Waktu job terakhir
+  restingUntil     DateTime?                  // Waktu istirahat sampai kapan
+
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 

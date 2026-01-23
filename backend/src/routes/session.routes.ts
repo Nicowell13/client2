@@ -412,4 +412,101 @@ router.post('/:id/request-code', async (req: Request, res: Response) => {
   }
 });
 
+// Reset job count untuk session (manual override)
+router.post('/:id/reset-jobs', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const session = await prisma.session.findUnique({ where: { id } });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+
+    // Reset job count dan status resting
+    await prisma.session.update({
+      where: { id },
+      data: {
+        jobCount: 0,
+        jobLimitReached: false,
+        restingUntil: null
+      } as any // Type assertion karena fields baru belum di-generate
+    });
+
+    console.log(`[SESSION][RESET-JOBS] Reset job count for session ${session.name}`);
+
+    return res.json({
+      success: true,
+      message: `Job count reset untuk session ${session.name}`,
+    });
+  } catch (error: any) {
+    console.error('[SESSION][RESET-JOBS] Error:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to reset job count',
+    });
+  }
+});
+
+// Retry waiting messages (kirim ulang pesan yang menunggu)
+router.post('/retry-waiting', async (_req: Request, res: Response) => {
+  try {
+    // Cari session yang available
+    const availableSessions = await prisma.session.findMany({
+      where: {
+        status: { in: ['working', 'ready', 'authenticated'] },
+      }
+    });
+
+    // Filter yang tidak sedang resting
+    const readySessions = availableSessions.filter((s: any) =>
+      !s.jobLimitReached && (!s.restingUntil || new Date(s.restingUntil) < new Date())
+    );
+
+    if (readySessions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tidak ada session yang tersedia untuk retry',
+      });
+    }
+
+    // Cari pesan dengan status 'waiting'
+    const waitingMessages = await prisma.message.findMany({
+      where: { status: 'waiting' },
+      include: { contact: true, campaign: true }
+    });
+
+    if (waitingMessages.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Tidak ada pesan yang menunggu untuk dikirim ulang',
+        data: { count: 0 }
+      });
+    }
+
+    // Update status menjadi pending untuk di-queue ulang
+    await prisma.message.updateMany({
+      where: { status: 'waiting' },
+      data: { status: 'pending', errorMsg: null }
+    });
+
+    console.log(`[SESSION][RETRY-WAITING] Marked ${waitingMessages.length} messages as pending for retry`);
+
+    return res.json({
+      success: true,
+      message: `${waitingMessages.length} pesan akan dikirim ulang`,
+      data: {
+        count: waitingMessages.length,
+        availableSessions: readySessions.length
+      }
+    });
+  } catch (error: any) {
+    console.error('[SESSION][RETRY-WAITING] Error:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Failed to retry waiting messages',
+    });
+  }
+});
+
 export default router;
+
