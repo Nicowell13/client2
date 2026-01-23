@@ -107,7 +107,7 @@ async function reassignCampaign(
 
         // Get all pending AND waiting messages for this campaign
         // FIXED: Include 'waiting' status for messages that failed due to session errors
-        const pendingMessages = await prisma.message.findMany({
+        const allMessages = await prisma.message.findMany({
             where: {
                 campaignId: campaign.id,
                 status: { in: ['pending', 'waiting'] }, // ← FIXED: Include 'waiting'
@@ -116,6 +116,33 @@ async function reassignCampaign(
                 contact: true,
             },
         });
+
+        // =====================================================
+        // SMART JOB PRIORITIZATION
+        // =====================================================
+        // Prioritize messages yang belum pernah dicoba (fresh)
+        // daripada messages yang sudah di-attempt session sebelumnya
+        const freshMessages = allMessages.filter((msg: any) =>
+            !msg.lastAttemptAt || msg.retryCount === 0
+        );
+
+        const attemptedMessages = allMessages.filter((msg: any) =>
+            msg.lastAttemptAt && msg.retryCount > 0
+        );
+
+        // Sort attempted messages by lastAttemptAt (oldest first)
+        attemptedMessages.sort((a: any, b: any) => {
+            const timeA = a.lastAttemptAt ? new Date(a.lastAttemptAt).getTime() : 0;
+            const timeB = b.lastAttemptAt ? new Date(b.lastAttemptAt).getTime() : 0;
+            return timeA - timeB;
+        });
+
+        // Combine: fresh messages first, then attempted messages
+        const pendingMessages = [...freshMessages, ...attemptedMessages];
+
+        console.log(
+            `[RECOVERY] Smart job assignment: ${freshMessages.length} fresh, ${attemptedMessages.length} attempted (total: ${pendingMessages.length})`
+        );
 
         if (pendingMessages.length === 0) {
             console.log(`[RECOVERY] No pending messages for campaign ${campaign.id}`);

@@ -154,6 +154,10 @@ model Message {
   retryCount  Int       @default(0)  // Jumlah retry yang sudah dilakukan
   maxRetries  Int       @default(3)  // Maksimal retry attempts
 
+  // Smart job assignment - track attempt history
+  lastAttemptAt  DateTime?  // Kapan terakhir kali message ini dicoba kirim
+  lastSessionId  String?    // Session mana yang terakhir coba kirim message ini
+
   sentAt      DateTime?
   deliveredAt DateTime?
 

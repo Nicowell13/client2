@@ -208,6 +208,17 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     await new Promise((r) => setTimeout(r, delay));
 
     // ------------------------------------
+    // TRACK ATTEMPT METADATA (for smart job assignment)
+    // ------------------------------------
+    await prisma.message.updateMany({
+      where: { campaignId, contactId, status: 'pending' },
+      data: {
+        lastAttemptAt: new Date(),
+        lastSessionId: sessionName
+      } as any
+    });
+
+    // ------------------------------------
     // CHECK SESSION STATUS BEFORE SENDING
     // ------------------------------------
     try {
@@ -382,7 +393,9 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
           data: {
             status: 'waiting',
             errorMsg: `Session unavailable, waiting for retry (${currentRetryCount + 1}/${maxRetries}): ${errorMsg.substring(0, 80)}`,
-            retryCount: { increment: 1 }
+            retryCount: { increment: 1 },
+            lastAttemptAt: new Date(),
+            lastSessionId: sessionName
           } as any, // Type assertion karena field baru
         });
 
