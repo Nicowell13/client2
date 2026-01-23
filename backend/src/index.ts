@@ -59,8 +59,16 @@ app.use('/webhook', webhookRoutes);
 // ====== ERROR HANDLER (LAST MIDDLEWARE) ======
 app.use(errorHandler);
 
-// ====== START SERVER ======
-app.listen(PORT, () => {
+// ====== START SERVER WITH SOCKET.IO ======
+import { createServer } from 'http';
+import { initializeSocketIO } from './services/socket.service';
+
+const httpServer = createServer(app);
+
+// Initialize Socket.IO
+initializeSocketIO(httpServer);
+
+httpServer.listen(PORT, () => {
   console.log(`⚡️ [server] Backend running at http://localhost:${PORT}`);
   console.log(`🌐 Using WAHA_URL = ${process.env.WAHA_URL}`);
   console.log(`🔑 API Key set: ${!!process.env.WAHA_API_KEY}`);

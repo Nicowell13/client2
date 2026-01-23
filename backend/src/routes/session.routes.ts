@@ -3,6 +3,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import wahaService from '../services/waha.service';
 import { authMiddleware } from '../middleware/auth';
+import { emitSessionUpdate } from '../services/socket.service';
 
 const router = Router();
 const MAX_SESSIONS = 10;
@@ -101,6 +102,16 @@ router.get('/', async (_req: Request, res: Response) => {
               phoneNumber: status?.me?.id || s.phoneNumber,
             },
           });
+
+          // Emit session update if status changed
+          if (updated.status !== s.status) {
+            emitSessionUpdate({
+              sessionId: updated.sessionId,
+              status: updated.status,
+              phoneNumber: updated.phoneNumber,
+            });
+          }
+
           return updated;
         } catch (_err) {
           return s;
@@ -181,6 +192,13 @@ router.post('/:id/start', async (req: Request, res: Response) => {
         status: 'starting',
         qrCode: null,
       },
+    });
+
+    // Emit session update event
+    emitSessionUpdate({
+      sessionId: updated.sessionId,
+      status: updated.status,
+      phoneNumber: updated.phoneNumber,
     });
 
     return res.json({ success: true, data: { session: updated, waha: wahaSession } });
@@ -308,11 +326,18 @@ router.post('/:id/stop', async (req: Request, res: Response) => {
 
     await wahaService.stopSession(session.sessionId);
 
-    await prisma.session.update({
+    const updated = await prisma.session.update({
       where: { id },
       data: {
         status: 'stopped',
       },
+    });
+
+    // Emit session update event
+    emitSessionUpdate({
+      sessionId: updated.sessionId,
+      status: updated.status,
+      phoneNumber: updated.phoneNumber,
     });
 
     return res.json({
@@ -363,6 +388,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     await prisma.session.delete({
       where: { id },
+    });
+
+    // Emit session update event for deletion
+    emitSessionUpdate({
+      sessionId: session.sessionId,
+      status: 'deleted',
+      phoneNumber: session.phoneNumber,
     });
 
     return res.json({

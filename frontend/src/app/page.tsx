@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Sidebar from '@/components/Sidebar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { campaignAPI, contactAPI, sessionAPI } from '@/lib/api-client';
+import { useWebSocket, useWebSocketEvent } from '@/lib/useWebSocket';
 import {
   Users,
   MessageSquare,
@@ -18,7 +19,9 @@ import {
   Clock,
   ArrowRight,
   Zap,
-  BarChart3
+  BarChart3,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 
 interface Stats {
@@ -54,7 +57,11 @@ export default function Home() {
     fetchStats();
   }, []);
 
-  const fetchStats = async () => {
+  // Initialize WebSocket connection
+  const { socket, isConnected } = useWebSocket({ autoConnect: true });
+
+  // Fetch stats from API (initial load)
+  const fetchStats = useCallback(async () => {
     try {
       const contactsResp = await contactAPI.getAll({ page: 1, limit: 1 });
       const contactsPayload = contactsResp.data;
@@ -104,7 +111,31 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  // WebSocket event listeners for real-time updates
+  useWebSocketEvent(socket, 'stats:update', (data: Partial<Stats>) => {
+    console.log('📊 [Dashboard] Stats update received:', data);
+    setStats((prev) => ({ ...prev, ...data }));
+  });
+
+  useWebSocketEvent(socket, 'campaign:update', (data: any) => {
+    console.log('📢 [Dashboard] Campaign update received:', data);
+    // Refresh stats to get updated campaign counts
+    fetchStats();
+  });
+
+  useWebSocketEvent(socket, 'message:update', (data: any) => {
+    console.log('💬 [Dashboard] Message update received:', data);
+    // Refresh stats to get updated message counts
+    fetchStats();
+  });
+
+  useWebSocketEvent(socket, 'session:update', (data: any) => {
+    console.log('📱 [Dashboard] Session update received:', data);
+    // Refresh stats to get updated session counts
+    fetchStats();
+  });
 
   if (isLoading) {
     return (
@@ -177,9 +208,23 @@ export default function Home() {
                 <p className="text-sm text-gray-600 mt-1">Welcome back, {user?.name}!</p>
               </div>
               <div className="hidden md:flex items-center gap-4">
-                <div className="flex items-center gap-2 px-4 py-2 bg-green-50 rounded-full">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium text-green-700">System Active</span>
+                {/* Real-time connection status indicator */}
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${isConnected
+                    ? 'bg-green-50 text-green-700'
+                    : 'bg-gray-50 text-gray-500'
+                  }`}>
+                  {isConnected ? (
+                    <>
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                      <Wifi className="w-4 h-4" />
+                      <span className="text-sm font-medium">Live</span>
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="w-4 h-4" />
+                      <span className="text-sm font-medium">Reconnecting...</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

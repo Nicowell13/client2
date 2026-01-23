@@ -105,11 +105,12 @@ async function reassignCampaign(
     try {
         console.log(`[RECOVERY] Reassigning campaign "${campaign.name}" from ${campaign.session.sessionId} to ${newSession.sessionId}`);
 
-        // Get all pending messages for this campaign
+        // Get all pending AND waiting messages for this campaign
+        // FIXED: Include 'waiting' status for messages that failed due to session errors
         const pendingMessages = await prisma.message.findMany({
             where: {
                 campaignId: campaign.id,
-                status: 'pending',
+                status: { in: ['pending', 'waiting'] }, // ← FIXED: Include 'waiting'
             },
             include: {
                 contact: true,

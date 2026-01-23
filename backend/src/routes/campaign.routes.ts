@@ -8,6 +8,7 @@ import { authMiddleware } from '../middleware/auth';
 import { executeAutoCampaigns } from '../services/auto-campaign.service';
 import { recoverFailedCampaigns } from '../services/campaign-recovery.service';
 import sessionRotation from '../services/session-rotation.service';
+import { emitCampaignUpdate } from '../services/socket.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -248,6 +249,15 @@ router.post('/:id/send', async (req: Request, res: Response) => {
         status: 'sending',
         totalContacts: contacts.length,
       },
+    });
+
+    // Emit campaign update event
+    emitCampaignUpdate({
+      campaignId: id,
+      status: 'sending',
+      sentCount: 0,
+      failedCount: 0,
+      totalContacts: contacts.length,
     });
 
     /* ===========================================================

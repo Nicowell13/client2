@@ -146,9 +146,13 @@ model Message {
   // relasi ke contact
   contact     Contact  @relation("ContactMessages", fields: [contactId], references: [id], onDelete: Cascade)
 
-  status      String    @default("pending") // pending, sent, delivered, failed
+  status      String    @default("pending") // pending, sent, delivered, failed, waiting
   waMessageId String?
   errorMsg    String?
+
+  // Retry tracking untuk failover
+  retryCount  Int       @default(0)  // Jumlah retry yang sudah dilakukan
+  maxRetries  Int       @default(3)  // Maksimal retry attempts
 
   sentAt      DateTime?
   deliveredAt DateTime?

@@ -2,6 +2,7 @@ import Bull from 'bull';
 import prisma from '../lib/prisma';
 import wahaService from './waha.service';
 import sessionRotation from './session-rotation.service';
+import { emitCampaignUpdate, emitMessageUpdate } from './socket.service';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -345,22 +346,52 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       }
 
       // =====================================================
-      // MARK AS WAITING (FOR RETRY WITH OTHER SESSION)
+      // CHECK RETRY COUNT (AVOID INFINITE LOOP)
       // =====================================================
-      // Jika error karena session logout/suspend, jangan mark sebagai failed
-      // tapi sebagai 'waiting' supaya bisa di-retry dengan session lain
-      console.log(`⏳ Marking message as 'waiting' for retry with another session`);
-
-      await prisma.message.updateMany({
-        where: { campaignId, contactId, status: 'pending' },
-        data: {
-          status: 'waiting',
-          errorMsg: `Session unavailable, waiting for retry: ${errorMsg.substring(0, 100)}`,
-        },
+      const existingMessage = await prisma.message.findFirst({
+        where: { campaignId, contactId, status: 'pending' }
       });
 
-      // Jangan increment failedCount karena akan di-retry
-      return { success: false, waiting: true, reason: 'session-unavailable' };
+      if (existingMessage) {
+        const currentRetryCount = (existingMessage as any).retryCount || 0;
+        const maxRetries = (existingMessage as any).maxRetries || 3;
+
+        if (currentRetryCount >= maxRetries) {
+          // Exceeded max retries, mark as failed
+          console.error(`❌ Message exceeded max retries (${maxRetries}), marking as failed`);
+
+          await prisma.message.updateMany({
+            where: { campaignId, contactId, status: 'pending' },
+            data: {
+              status: 'failed',
+              errorMsg: `Max retries (${maxRetries}) exceeded: ${errorMsg.substring(0, 100)}`,
+            },
+          });
+
+          await safeCampaignUpdate(campaignId, { failedCount: { increment: 1 } });
+          throw error;
+        }
+
+        // =====================================================
+        // MARK AS WAITING (FOR RETRY WITH OTHER SESSION)
+        // =====================================================
+        console.log(`⏳ Marking message as 'waiting' for retry (attempt ${currentRetryCount + 1}/${maxRetries})`);
+
+        await prisma.message.updateMany({
+          where: { campaignId, contactId, status: 'pending' },
+          data: {
+            status: 'waiting',
+            errorMsg: `Session unavailable, waiting for retry (${currentRetryCount + 1}/${maxRetries}): ${errorMsg.substring(0, 80)}`,
+            retryCount: { increment: 1 }
+          } as any, // Type assertion karena field baru
+        });
+
+        // Jangan increment failedCount karena akan di-retry
+        return { success: false, waiting: true, reason: 'session-unavailable' };
+      }
+
+      // Fallback jika message tidak ditemukan
+      return { success: false, waiting: false, reason: 'message-not-found' };
     }
 
     // =====================================================
@@ -388,11 +419,48 @@ function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
   queue.process(1, processCampaignJob);
 
   queue.on('completed', async (job) => {
-    const { campaignId } = job.data;
+    const { campaignId, contactId } = job.data;
+
+    // Emit message update event
+    const message = await prisma.message.findFirst({
+      where: { campaignId, contactId },
+    });
+    if (message) {
+      emitMessageUpdate({
+        campaignId,
+        contactId,
+        status: message.status,
+        waMessageId: message.waMessageId,
+        errorMsg: message.errorMsg,
+      });
+    }
 
     const pending = await prisma.message.count({
       where: { campaignId, status: 'pending' },
     });
+
+    // Get campaign stats for real-time update
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: {
+        id: true,
+        status: true,
+        sentCount: true,
+        failedCount: true,
+        totalContacts: true,
+      },
+    });
+
+    if (campaign) {
+      // Emit campaign update with current stats
+      emitCampaignUpdate({
+        campaignId: campaign.id,
+        status: campaign.status,
+        sentCount: campaign.sentCount,
+        failedCount: campaign.failedCount,
+        totalContacts: campaign.totalContacts,
+      });
+    }
 
     if (pending === 0) {
       const failed = await prisma.message.count({
@@ -403,12 +471,64 @@ function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
         status: failed > 0 ? 'sent' : 'sent',
       });
 
+      // Emit final campaign update
+      const finalCampaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+      });
+      if (finalCampaign) {
+        emitCampaignUpdate({
+          campaignId: finalCampaign.id,
+          status: finalCampaign.status,
+          sentCount: finalCampaign.sentCount,
+          failedCount: finalCampaign.failedCount,
+          totalContacts: finalCampaign.totalContacts,
+        });
+      }
+
       console.log(`🎉 Campaign ${campaignId} finished`);
     }
   });
 
   queue.on('failed', async (job, err) => {
     console.error(`❌ Job ${job.id} failed:`, err.message);
+
+    const { campaignId, contactId } = job.data;
+
+    // Emit message update event for failed message
+    const message = await prisma.message.findFirst({
+      where: { campaignId, contactId },
+    });
+    if (message) {
+      emitMessageUpdate({
+        campaignId,
+        contactId,
+        status: message.status,
+        waMessageId: message.waMessageId,
+        errorMsg: message.errorMsg,
+      });
+    }
+
+    // Emit campaign update with current stats
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: {
+        id: true,
+        status: true,
+        sentCount: true,
+        failedCount: true,
+        totalContacts: true,
+      },
+    });
+
+    if (campaign) {
+      emitCampaignUpdate({
+        campaignId: campaign.id,
+        status: campaign.status,
+        sentCount: campaign.sentCount,
+        failedCount: campaign.failedCount,
+        totalContacts: campaign.totalContacts,
+      });
+    }
   });
 
   queue.on('stalled', (job) => {
