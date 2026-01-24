@@ -348,7 +348,7 @@ export default function SessionsPage() {
                     {/* Job Count Display */}
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-600">
-                        <span className="font-medium">Jobs:</span> {(session as any).jobCount || 0}/50
+                        <span className="font-medium">Jobs:</span> {(session as any).jobCount || 0}/30
                       </span>
                       {(session as any).jobLimitReached && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
@@ -362,7 +362,7 @@ export default function SessionsPage() {
                       <div
                         className={`h-2 rounded-full transition-all ${(session as any).jobLimitReached ? 'bg-yellow-500' : 'bg-blue-600'
                           }`}
-                        style={{ width: `${Math.min(((session as any).jobCount || 0) / 50 * 100, 100)}%` }}
+                        style={{ width: `${Math.min(((session as any).jobCount || 0) / 30 * 100, 100)}%` }}
                       ></div>
                     </div>
                     <div className="flex gap-2 flex-wrap">
