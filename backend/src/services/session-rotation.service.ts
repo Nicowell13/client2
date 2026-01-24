@@ -3,7 +3,7 @@
  * Session Rotation Service
  * 
  * Mengelola rotasi session untuk menghindari suspend/banned WhatsApp:
- * 1. Membatasi setiap session hanya 50 job per periode
+ * 1. Membatasi setiap session hanya 30 job per periode
  * 2. Prioritaskan session yang belum bekerja atau sudah istirahat
  * 3. Auto-reassign message failed karena logout ke session lain
  */
@@ -11,7 +11,7 @@
 import prisma from '../lib/prisma';
 
 // Konfigurasi dari environment variables
-const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 50);
+const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 30);
 const REST_HOURS = Number(process.env.SESSION_REST_HOURS || 1);
 
 // Status session yang dianggap aktif/connected
