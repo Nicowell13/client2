@@ -1,0 +1,248 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database - NOT exposed to host
+  postgres:
+    image: postgres:15-alpine
+    container_name: whatsapp-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-whatsapp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whatsapp_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-whatsapp_db}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whatsapp_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+  # Redis for Queue Management - NOT exposed to host
+  redis:
+    image: redis:7-alpine
+    container_name: whatsapp-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secure_password}
+    volumes:
+      - redis_data:/data
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+
+  # WAHA Plus (WhatsApp HTTP API) - NOT exposed to host
+  waha:
+    image: devlikeapro/waha-plus:latest
+    container_name: whatsapp-waha
+    environment:
+      # WAHA Configuration
+      - WAHA_PRINT_QR=True
+      - WHATSAPP_API_PORT=3000
+      - WHATSAPP_API_HOSTNAME=0.0.0.0
+      
+      # Security - API Key untuk autentikasi
+      - WHATSAPP_API_KEY=${WAHA_API_KEY}
+      
+      # WAHA Plus License
+      - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY}
+      
+      # Session configuration
+      - WHATSAPP_RESTART_ALL_SESSIONS=True
+      - WHATSAPP_START_SESSIONS=default
+      
+      # Engine (WAHA Plus WEBJS engine)
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      
+      # Webhook configuration
+      - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
+      - WHATSAPP_HOOK_URL=http://backend:4000/webhook/whatsapp
+      
+      # Files & Media
+      - WHATSAPP_FILES_FOLDER=/app/files
+      - WHATSAPP_FILES_LIFETIME=180
+      
+    volumes:
+      - waha_data:/app/.sessions
+      - waha_files:/app/files
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Express Backend API - NOT exposed to host
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: whatsapp-backend
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-whatsapp_user}:${POSTGRES_PASSWORD:-whatsapp_pass}@postgres:5432/${POSTGRES_DB:-whatsapp_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secure_password}@redis:6379
+      - WAHA_URL=http://waha:3000
+      - BACKEND_URL=https://api0.watrix.online
+      - WAHA_API_KEY=${WAHA_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - PORT=4000
+      - GLOBAL_SEND_CONCURRENCY=2
+    volumes:
+      - ./backend/uploads:/app/uploads
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      waha:
+        condition: service_started
+
+  # Next.js Frontend - Exposed only through Nginx Proxy Manager
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://api0.watrix.online
+    container_name: whatsapp-frontend
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Nginx - Reverse proxy for internal routing
+  # External access via Nginx Proxy Manager
+  nginx:
+    image: nginx:alpine
+    container_name: whatsapp-nginx
+    ports:
+      - "8080:80"  # Exposed to Nginx Proxy Manager
+      - "8081:81"  # Backend API exposed to Nginx Proxy Manager
+    volumes:
+      - ./nginx/nginx-aws.conf:/etc/nginx/nginx.conf:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - whatsapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - frontend
+      - backend
+
+networks:
+  whatsapp-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  waha_data:
+    driver: local
+  waha_files:
+    driver: local
+  nginx_logs:
+    driver: local
