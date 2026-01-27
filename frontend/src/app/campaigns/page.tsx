@@ -238,8 +238,8 @@ export default function CampaignsPage() {
       return;
     }
 
-    if (draftCampaigns.length > 10) {
-      toast.error('Maksimal 10 campaign dapat dieksekusi secara otomatis');
+    if (draftCampaigns.length > 5) {
+      toast.error('Maksimal 5 campaign dapat dieksekusi secara otomatis');
       return;
     }
 

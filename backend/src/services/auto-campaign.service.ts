@@ -3,7 +3,7 @@ import prisma from '../lib/prisma';
 import wahaService from './waha.service';
 import { getCampaignQueue } from './queue.service';
 
-const MAX_SESSIONS = 10;
+const MAX_SESSIONS = 5;
 const DEFAULT_CAMPAIGN_DELAY_MS = 60000; // 1 minute delay between campaigns
 
 interface AutoCampaignConfig {

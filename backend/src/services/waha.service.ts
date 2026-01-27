@@ -314,11 +314,27 @@ class WahaService {
     caption?: string
   ) {
     try {
+      // Extract filename from URL or use default
+      const urlParts = imageUrl.split('/');
+      const filename = urlParts[urlParts.length - 1] || 'image.jpg';
+
+      // Determine mimetype from filename extension or default to jpeg
+      let mimetype = 'image/jpeg';
+      if (filename.toLowerCase().endsWith('.png')) {
+        mimetype = 'image/png';
+      } else if (filename.toLowerCase().endsWith('.gif')) {
+        mimetype = 'image/gif';
+      } else if (filename.toLowerCase().endsWith('.webp')) {
+        mimetype = 'image/webp';
+      }
+
       const response = await this.client.post('/api/sendImage', {
         session: sessionName,
         chatId: `${phoneNumber}@c.us`,
         file: {
+          mimetype,
           url: imageUrl,
+          filename,
         },
         caption,
       });

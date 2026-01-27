@@ -6,7 +6,7 @@ import { authMiddleware } from '../middleware/auth';
 import { emitSessionUpdate } from '../services/socket.service';
 
 const router = Router();
-const MAX_SESSIONS = 10;
+const MAX_SESSIONS = 5;
 
 // Protect all session routes
 router.use(authMiddleware);
