@@ -28,7 +28,7 @@ mkdir -p ${BACKUP_DIR}
 echo "🗄️  Starting database backup..."
 
 # Backup PostgreSQL database
-docker-compose -f docker-compose.aws.yml exec -T postgres pg_dump \
+sudo docker compose -f docker-compose.aws.yml exec -T postgres pg_dump \
     -U ${POSTGRES_USER:-whatsapp_user} \
     ${POSTGRES_DB:-whatsapp_db} \
     > ${BACKUP_DIR}/${BACKUP_FILE}
