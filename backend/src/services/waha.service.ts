@@ -359,36 +359,27 @@ class WahaService {
     }
   }
 
-  // WAHA Free: kirim URL sebagai teks pengganti tombol native
+  // Send message - buttons parameter ignored for safety (reduces ban risk)
+  // Function signature kept for backward compatibility
   async sendMessageWithButtons(
     sessionName: string,
     phoneNumber: string,
     message: string,
     imageUrl: string | null,
-    buttons: Array<{ label: string; url: string }>
+    buttons: Array<{ label: string; url: string }> // Ignored - kept for compatibility
   ) {
     try {
-      let fullMessage = message;
-
-      // Add buttons/URLs with proper formatting for WhatsApp clickable links
-      if (buttons.length > 0) {
-        fullMessage += '\n\n';
-        buttons.forEach((btn, index) => {
-          // Format: Label on one line, URL on the next line with proper spacing
-          // This ensures WhatsApp detects and makes the URL clickable
-          fullMessage += `${index + 1}. ${btn.label}\n${btn.url}\n\n`;
-        });
-      }
-
+      // Send plain text or image message only (no button processing)
+      // URLs in message text are automatically clickable in WhatsApp
       if (imageUrl) {
-        return await this.sendImageMessage(sessionName, phoneNumber, imageUrl, fullMessage);
+        return await this.sendImageMessage(sessionName, phoneNumber, imageUrl, message);
       }
 
-      return await this.sendTextMessage(sessionName, phoneNumber, fullMessage);
+      return await this.sendTextMessage(sessionName, phoneNumber, message);
     } catch (error: any) {
       const msg = this.formatAxiosError(error);
-      console.error('[WAHA] Failed to send message with buttons:', msg);
-      throw new Error(`Failed to send message with buttons: ${msg}`);
+      console.error('[WAHA] Failed to send message:', msg);
+      throw new Error(`Failed to send message: ${msg}`);
     }
   }
 }

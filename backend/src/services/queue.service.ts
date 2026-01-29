@@ -252,10 +252,22 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     await acquireGlobalSendSlot();
     let result: any;
     try {
+      // Get contact name for template replacement
+      const contact = await prisma.contact.findUnique({
+        where: { id: contactId },
+        select: { name: true }
+      });
+
+      // Replace {{nama}} placeholder with actual contact name
+      let finalMessage = message;
+      if (contact?.name) {
+        finalMessage = message.replace(/\{\{nama\}\}/gi, contact.name);
+      }
+
       result = await wahaService.sendMessageWithButtons(
         sessionName,
         phoneNumber,
-        message,
+        finalMessage,
         imageUrl,
         buttons
       );

@@ -29,10 +29,6 @@ export default function CampaignsPage() {
     name: "",
     imageUrl: "",
     sessionId: "",
-    button1Label: "",
-    button1Url: "",
-    button2Label: "",
-    button2Url: "",
   });
 
   // ⭐ NEW: Multi-session support
@@ -146,13 +142,6 @@ export default function CampaignsPage() {
       return toast.error("Please select at least one session");
     }
 
-    const buttons: Array<{ label: string; url: string }> = [];
-    if (newCampaign.button1Label && newCampaign.button1Url)
-      buttons.push({ label: newCampaign.button1Label, url: newCampaign.button1Url });
-
-    if (newCampaign.button2Label && newCampaign.button2Url)
-      buttons.push({ label: newCampaign.button2Label, url: newCampaign.button2Url });
-
     try {
       // Create campaign for each selected session
       const createPromises = targetSessions.map((sessionId, index) =>
@@ -161,7 +150,7 @@ export default function CampaignsPage() {
           messages: filteredMessages,
           imageUrl: newCampaign.imageUrl || null,
           sessionId: sessionId,
-          buttons,
+          buttons: [], // Buttons disabled for safety
         })
       );
 
@@ -179,10 +168,6 @@ export default function CampaignsPage() {
         name: "",
         imageUrl: "",
         sessionId: "",
-        button1Label: "",
-        button1Url: "",
-        button2Label: "",
-        button2Url: "",
       });
       setSelectedSessions([]);
       setUseAllSessions(false);
@@ -551,67 +536,15 @@ export default function CampaignsPage() {
                 )}
               </div>
 
-              {/* BUTTONS */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block">Button 1 Label</label>
-                  <input
-                    type="text"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    value={newCampaign.button1Label}
-                    onChange={(e) =>
-                      setNewCampaign({
-                        ...newCampaign,
-                        button1Label: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div>
-                  <label className="block">Button 1 URL</label>
-                  <input
-                    type="url"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    value={newCampaign.button1Url}
-                    onChange={(e) =>
-                      setNewCampaign({
-                        ...newCampaign,
-                        button1Url: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div>
-                  <label className="block">Button 2 Label</label>
-                  <input
-                    type="text"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    value={newCampaign.button2Label}
-                    onChange={(e) =>
-                      setNewCampaign({
-                        ...newCampaign,
-                        button2Label: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-
-                <div>
-                  <label className="block">Button 2 URL</label>
-                  <input
-                    type="url"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    value={newCampaign.button2Url}
-                    onChange={(e) =>
-                      setNewCampaign({
-                        ...newCampaign,
-                        button2Url: e.target.value,
-                      })
-                    }
-                  />
-                </div>
+              {/* Template Placeholder Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-blue-900 mb-2">💡 Template Placeholder</p>
+                <p className="text-sm text-blue-700">
+                  Gunakan <code className="bg-blue-100 px-1 rounded">{'{{nama}}'}</code> untuk menampilkan nama contact secara otomatis.
+                </p>
+                <p className="text-xs text-blue-600 mt-2">
+                  Contoh: &quot;Halo {'{{nama}}'}, promo spesial untuk Anda!&quot;
+                </p>
               </div>
 
               <button
