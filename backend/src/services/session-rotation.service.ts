@@ -213,6 +213,62 @@ export async function resetSessionJobCount(sessionId: string): Promise<void> {
     console.log(`[SESSION-ROTATION] Reset job count for session ${sessionId}`);
 }
 
+/**
+ * Get sessions yang dalam kondisi standby (sudah selesai resting, siap bekerja lagi)
+ */
+export async function getStandbySessions(): Promise<any[]> {
+    // Reset dulu session yang sudah selesai istirahat
+    await resetRestedSessions();
+
+    // Cari session yang baru saja selesai resting
+    return await prisma.session.findMany({
+        where: {
+            status: { in: ACTIVE_STATUSES },
+            jobCount: 0, // Sudah di-reset
+            jobLimitReached: false
+        },
+        orderBy: { updatedAt: 'desc' } // Yang baru selesai resting duluan
+    });
+}
+
+/**
+ * Get count of waiting messages yang perlu di-redistribute
+ */
+export async function getWaitingMessagesCount(): Promise<number> {
+    return await prisma.message.count({
+        where: { status: 'waiting' }
+    });
+}
+
+/**
+ * Force redistribute semua waiting messages (triggered manually atau saat ada session baru available)
+ */
+export async function forceRedistributeWaitingMessages(sessionId?: string): Promise<number> {
+    const availableSession = sessionId
+        ? await prisma.session.findFirst({ where: { sessionId, status: { in: ACTIVE_STATUSES } } })
+        : await getBestAvailableSession([]);
+
+    if (!availableSession) {
+        console.warn('[SESSION-ROTATION] No available session for redistribution');
+        return 0;
+    }
+
+    // Update waiting messages ke pending supaya bisa di-pickup oleh queue
+    const result = await prisma.message.updateMany({
+        where: { status: 'waiting' },
+        data: {
+            status: 'pending',
+            errorMsg: null
+        }
+    });
+
+    if (result.count > 0) {
+        console.log(`[SESSION-ROTATION] Force redistributed ${result.count} waiting messages`);
+    }
+
+    return result.count;
+}
+
 export default {
     resetRestedSessions,
     isSessionAvailable,
@@ -222,6 +278,9 @@ export default {
     markSessionUnavailable,
     reassignPendingMessages,
     resetSessionJobCount,
+    getStandbySessions,
+    getWaitingMessagesCount,
+    forceRedistributeWaitingMessages,
     JOB_LIMIT,
     REST_HOURS
 };

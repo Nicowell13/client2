@@ -16,6 +16,7 @@ import { errorHandler } from './middleware/errorHandler';
 
 // Services
 import { scheduleAutoRecovery } from './services/campaign-recovery.service';
+import { startSessionMonitor } from './services/session-monitor.service';
 
 dotenv.config();
 
@@ -76,6 +77,10 @@ httpServer.listen(PORT, () => {
   // Start auto-recovery scheduler (runs every 5 minutes)
   console.log('🔄 Starting campaign auto-recovery scheduler...');
   scheduleAutoRecovery(300000); // 5 minutes = 300000ms
+
+  // Start real-time session monitor (runs every 30 seconds)
+  console.log('👁️ Starting real-time session monitor...');
+  startSessionMonitor(30000); // 30 seconds = 30000ms
 });
 
 export default app;
