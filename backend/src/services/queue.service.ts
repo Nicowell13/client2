@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import wahaService from './waha.service';
 import sessionRotation from './session-rotation.service';
 import { emitCampaignUpdate, emitMessageUpdate } from './socket.service';
+import contentVariation from './content-variation.service';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -31,30 +32,59 @@ interface CampaignJob {
 }
 
 // ========================================================
-// DELAY SYSTEM (WHATSAPP SAFE)
+// DELAY SYSTEM (WHATSAPP SAFE - OPTIMIZED FOR ANTI-BAN)
 // ========================================================
+
+// Environment variable untuk kustomisasi delay
+const MESSAGE_DELAY_MIN_MS = Number(process.env.MESSAGE_DELAY_MIN_MS || 25000);
+const MESSAGE_DELAY_MAX_MS = Number(process.env.MESSAGE_DELAY_MAX_MS || 45000);
+const TYPING_INDICATOR_ENABLED = process.env.TYPING_INDICATOR_ENABLED !== 'false';
+const READ_RECEIPT_ENABLED = process.env.READ_RECEIPT_ENABLED !== 'false';
+
 function random(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+/**
+ * Get time-based delay multiplier
+ * Pagi lebih lambat, siang normal, malam sedikit lebih lambat
+ */
+function getTimeMultiplier(): number {
+  const hour = new Date().getHours();
+
+  if (hour >= 10 && hour < 12) return 1.3;  // Pagi: lebih lambat
+  if (hour >= 12 && hour < 18) return 1.0;  // Siang: normal
+  if (hour >= 18 && hour < 20) return 1.1;  // Sore: sedikit lambat
+  if (hour >= 20 && hour < 22) return 1.2;  // Malam: lebih lambat
+
+  return 1.5; // Di luar jam kerja: sangat lambat (jika masih berjalan)
+}
+
 function calcMessageDelay(index: number): number {
-  // NOTE: previously this used step-based growth (every 5 messages) which can
-  // create multi-minute pauses around index ~20+ and looks like the system is stuck.
-  // Keep WhatsApp-safe jitter but cap delay to avoid long silent gaps.
-  const base = random(12000, 20000);
+  // Base delay yang lebih tinggi untuk anti-ban
+  const base = random(MESSAGE_DELAY_MIN_MS, MESSAGE_DELAY_MAX_MS);
 
-  // gradual backoff: grows slowly with index, capped
-  const gradual = Math.min(index * random(250, 600), 15000);
+  // Gradual backoff: grows slowly with index, capped
+  const gradual = Math.min(index * random(300, 800), 20000);
 
-  // occasional cooldown to be safe (every 5 messages), capped
-  const periodic = index > 0 && index % 5 === 0 ? random(20000, 40000) : 0;
+  // Occasional cooldown (every 5 messages)
+  const periodic = index > 0 && index % 5 === 0 ? random(25000, 50000) : 0;
 
-  const delay = base + gradual + periodic;
-  return Math.min(delay, 60000);
+  // Extra break every 10 messages
+  const longBreak = index > 0 && index % 10 === 0 ? random(60000, 90000) : 0;
+
+  // Apply time multiplier
+  const timeMultiplier = getTimeMultiplier();
+
+  const delay = Math.floor((base + gradual + periodic + longBreak) * timeMultiplier);
+
+  // Cap at 3 minutes max to avoid looking stuck
+  return Math.min(delay, 180000);
 }
 
 function batchCooldown(batchIndex: number): number {
-  return batchIndex === 0 ? 0 : random(30000, 45000);
+  // Cooldown lebih panjang antar batch
+  return batchIndex === 0 ? 0 : random(45000, 75000);
 }
 
 function sleep(ms: number) {
@@ -192,6 +222,37 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     }
 
     // ------------------------------------
+    // CHECK BROADCAST HOURS (ANTI-BAN)
+    // ------------------------------------
+    if (!sessionRotation.isWithinBroadcastHours()) {
+      console.log(`⏰ Outside broadcast hours, job will be delayed`);
+      // Re-queue dengan delay sampai jam broadcast mulai
+      throw new Error('Outside broadcast hours - will retry later');
+    }
+
+    // ------------------------------------
+    // CHECK DAILY LIMIT (ANTI-BAN)
+    // ------------------------------------
+    try {
+      const dailyLimitReached = await sessionRotation.checkDailyLimit(sessionName);
+      if (dailyLimitReached) {
+        console.log(`📊 Session ${sessionName} reached daily limit, marking for retry with other session`);
+        // Mark as waiting untuk di-pickup oleh session lain
+        await prisma.message.updateMany({
+          where: { campaignId, contactId, status: 'pending' },
+          data: {
+            status: 'waiting',
+            errorMsg: 'Daily limit reached, waiting for another session'
+          }
+        });
+        return { success: false, waiting: true, reason: 'daily-limit-reached' };
+      }
+    } catch (limitError: any) {
+      console.warn(`⚠ Daily limit check failed:`, limitError.message);
+      // Continue anyway - gagal check bukan berarti harus stop
+    }
+
+    // ------------------------------------
     // BATCH COOLDOWN
     // ------------------------------------
     if (messageIndex === 0) {
@@ -204,7 +265,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     // PER MESSAGE DELAY
     // ------------------------------------
     const delay = calcMessageDelay(messageIndex);
-    console.log(`⏳ Delay ${delay}ms before send`);
+    console.log(`⏳ Delay ${delay}ms before send (time multiplier: ${getTimeMultiplier()}x)`);
     await new Promise((r) => setTimeout(r, delay));
 
     // ------------------------------------
@@ -252,26 +313,69 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     await acquireGlobalSendSlot();
     let result: any;
     try {
-      // Get contact name for template replacement
+      // Get contact info for template replacement
       const contact = await prisma.contact.findUnique({
         where: { id: contactId },
-        select: { name: true, phoneNumber: true }
+        select: { id: true, name: true, phoneNumber: true }
       });
 
-      // Replace {{nama}} placeholder with actual contact name
-      // Fallback to phone number if name is empty
-      let finalMessage = message;
-      const contactName = contact?.name?.trim() || contact?.phoneNumber || phoneNumber;
-
-      // Log untuk debugging
-      console.log(`[TEMPLATE] Contact: ${contactId}, Name: "${contact?.name}", Using: "${contactName}"`);
-
-      // Replace semua variasi {{nama}} (case insensitive)
-      if (message.includes('{{') && message.includes('}}')) {
-        finalMessage = message.replace(/\{\{nama\}\}/gi, contactName);
-        console.log(`[TEMPLATE] Original: "${message.substring(0, 50)}..." → Final: "${finalMessage.substring(0, 50)}..."`);
+      if (!contact) {
+        throw new Error(`Contact ${contactId} not found`);
       }
 
+      // =========================================
+      // HUMAN-LIKE BEHAVIOR (ANTI-BAN)
+      // =========================================
+
+      // 1. Set presence to available (online)
+      try {
+        await wahaService.setPresence(sessionName, 'available');
+      } catch (presenceError: any) {
+        console.warn(`[HUMAN] Presence set failed:`, presenceError.message);
+      }
+
+      // 2. Mark chat as seen (read receipt) - optional
+      if (READ_RECEIPT_ENABLED) {
+        try {
+          await wahaService.markChatAsSeen(sessionName, phoneNumber);
+        } catch (seenError: any) {
+          console.warn(`[HUMAN] Mark seen failed:`, seenError.message);
+        }
+      }
+
+      // 3. Send typing indicator before message
+      if (TYPING_INDICATOR_ENABLED) {
+        // Duration berdasarkan panjang pesan (min 2s, max 8s)
+        const typingDuration = Math.min(2000 + message.length * 30, 8000);
+        try {
+          await wahaService.sendTypingIndicator(sessionName, phoneNumber, typingDuration);
+        } catch (typingError: any) {
+          console.warn(`[HUMAN] Typing indicator failed:`, typingError.message);
+        }
+
+        // Extra random delay after typing
+        await sleep(random(500, 1500));
+      }
+
+      // =========================================
+      // CONTENT VARIATION (ANTI-BAN)
+      // =========================================
+
+      // Process message with all variations:
+      // - Spintext: {Hi|Halo|Hai} → random selection
+      // - {{nama}} → contact name
+      // - URL params → unique per contact
+      // - Fingerprint → invisible variations
+      const finalMessage = contentVariation.processMessageTemplate(message, contact);
+
+      // Log untuk debugging - termasuk info nama kontak
+      console.log(`[CONTENT] Contact: id=${contact.id}, name="${contact.name}", phone="${contact.phoneNumber}"`);
+      console.log(`[CONTENT] Original: "${message.substring(0, 60)}..."`);
+      console.log(`[CONTENT] Final: "${finalMessage.substring(0, 60)}..."`);
+
+      // =========================================
+      // SEND THE MESSAGE
+      // =========================================
       result = await wahaService.sendMessageWithButtons(
         sessionName,
         phoneNumber,
@@ -313,6 +417,34 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       }
     } catch (jobCountError: any) {
       console.warn(`⚠ Failed to increment job count:`, jobCountError.message);
+    }
+
+    // ------------------------------------
+    // INCREMENT DAILY COUNT (ANTI-BAN)
+    // ------------------------------------
+    try {
+      const dailyCount = await sessionRotation.incrementDailyCount(sessionName);
+      console.log(`📊 Session ${sessionName} daily count: ${dailyCount}/${sessionRotation.DAILY_MESSAGE_LIMIT}`);
+    } catch (dailyError: any) {
+      console.warn(`⚠ Failed to increment daily count:`, dailyError.message);
+    }
+
+    // ------------------------------------
+    // UPDATE QUALITY SCORE (SUCCESS)
+    // ------------------------------------
+    try {
+      await sessionRotation.updateQualityScore(sessionName, true, false);
+    } catch (qualityError: any) {
+      console.warn(`⚠ Failed to update quality score:`, qualityError.message);
+    }
+
+    // ------------------------------------
+    // SET CONTACT COOLDOWN (ANTI-SPAM)
+    // ------------------------------------
+    try {
+      await sessionRotation.setContactCooldown(contactId, 24); // 24 jam cooldown
+    } catch (cooldownError: any) {
+      console.warn(`⚠ Failed to set contact cooldown:`, cooldownError.message);
     }
 
     return { success: true, messageId: waMessageId };

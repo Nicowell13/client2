@@ -45,6 +45,15 @@ model Session {
   lastJobAt        DateTime?                  // Waktu job terakhir
   restingUntil     DateTime?                  // Waktu istirahat sampai kapan
 
+  // Daily tracking untuk rate limiting
+  dailyMessageCount  Int       @default(0)    // Pesan hari ini
+  lastDailyReset     DateTime?                // Kapan terakhir reset harian
+
+  // Session quality scoring
+  qualityScore       Float     @default(100)  // 0-100, menurun jika banyak error
+  lastErrorAt        DateTime?                // Waktu error terakhir
+  consecutiveErrors  Int       @default(0)    // Error berturut-turut
+
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -71,6 +80,11 @@ model Contact {
   session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   messages    Message[] @relation("ContactMessages")
+
+  // Contact cooldown tracking untuk anti-spam
+  lastMessageAt   DateTime?               // Kapan terakhir dikirim pesan
+  messageCount    Int       @default(0)   // Total pesan yang pernah dikirim ke kontak ini
+  cooldownUntil   DateTime?               // Jangan kirim sampai waktu ini
 
   @@unique([phoneNumber, sessionId])
   @@map("contacts")

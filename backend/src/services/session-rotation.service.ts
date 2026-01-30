@@ -6,6 +6,9 @@
  * 1. Membatasi setiap session hanya 30 job per periode
  * 2. Prioritaskan session yang belum bekerja atau sudah istirahat
  * 3. Auto-reassign message failed karena logout ke session lain
+ * 4. Daily message limit per session
+ * 5. Broadcast hours restriction
+ * 6. Session quality scoring
  */
 
 import prisma from '../lib/prisma';
@@ -13,6 +16,17 @@ import prisma from '../lib/prisma';
 // Konfigurasi dari environment variables
 const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 30);
 const REST_HOURS = Number(process.env.SESSION_REST_HOURS || 1);
+
+// Daily limit dan broadcast hours
+const DAILY_MESSAGE_LIMIT = Number(process.env.DAILY_MESSAGE_LIMIT || 40);
+const BROADCAST_START_HOUR = Number(process.env.BROADCAST_START_HOUR || 10);
+const BROADCAST_END_HOUR = Number(process.env.BROADCAST_END_HOUR || 22);
+
+// Quality scoring
+const QUALITY_SUCCESS_BONUS = 0.5;    // Point gained per success
+const QUALITY_ERROR_PENALTY = 5;      // Point lost per error
+const QUALITY_SESSION_ERROR_PENALTY = 20; // Point lost per session error
+const QUALITY_MIN_THRESHOLD = 50;     // Below this, session is paused
 
 // Status session yang dianggap aktif/connected
 const ACTIVE_STATUSES = ['working', 'ready', 'authenticated'];
@@ -269,6 +283,241 @@ export async function forceRedistributeWaitingMessages(sessionId?: string): Prom
     return result.count;
 }
 
+// ========================================================
+// DAILY LIMIT & BROADCAST HOURS (NEW)
+// ========================================================
+
+/**
+ * Get current hour in Jakarta timezone (UTC+7)
+ */
+function getJakartaHour(): number {
+    const now = new Date();
+    // Offset untuk Jakarta (UTC+7)
+    const jakartaOffset = 7 * 60; // dalam menit
+    const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const jakartaMinutes = utcMinutes + jakartaOffset;
+    return Math.floor((jakartaMinutes % 1440) / 60); // 1440 = total menit dalam sehari
+}
+
+/**
+ * Get start of today in Jakarta timezone
+ */
+function getJakartaTodayStart(): Date {
+    const now = new Date();
+    const jakartaOffset = 7 * 60 * 60 * 1000; // 7 hours in ms
+    const jakartaNow = new Date(now.getTime() + jakartaOffset);
+    const jakartaToday = new Date(jakartaNow.getFullYear(), jakartaNow.getMonth(), jakartaNow.getDate());
+    return new Date(jakartaToday.getTime() - jakartaOffset);
+}
+
+/**
+ * Cek apakah sekarang dalam jam broadcast yang diizinkan
+ */
+export function isWithinBroadcastHours(): boolean {
+    const currentHour = getJakartaHour();
+    const isWithin = currentHour >= BROADCAST_START_HOUR && currentHour < BROADCAST_END_HOUR;
+
+    if (!isWithin) {
+        console.log(`[SESSION-ROTATION] Outside broadcast hours. Current: ${currentHour}:00, Allowed: ${BROADCAST_START_HOUR}:00-${BROADCAST_END_HOUR}:00`);
+    }
+
+    return isWithin;
+}
+
+/**
+ * Reset daily counts jika sudah hari baru
+ */
+export async function resetDailyCountsIfNewDay(): Promise<number> {
+    const todayStart = getJakartaTodayStart();
+
+    const result = await prisma.session.updateMany({
+        where: {
+            OR: [
+                { lastDailyReset: null },
+                { lastDailyReset: { lt: todayStart } }
+            ]
+        },
+        data: {
+            dailyMessageCount: 0,
+            lastDailyReset: new Date()
+        }
+    });
+
+    if (result.count > 0) {
+        console.log(`[SESSION-ROTATION] Reset daily counts for ${result.count} sessions`);
+    }
+
+    return result.count;
+}
+
+/**
+ * Cek apakah session sudah mencapai daily limit
+ */
+export async function checkDailyLimit(sessionId: string): Promise<boolean> {
+    // Reset dulu jika hari baru
+    await resetDailyCountsIfNewDay();
+
+    const session = await prisma.session.findUnique({
+        where: { sessionId },
+        select: { dailyMessageCount: true }
+    });
+
+    if (!session) return true; // Block if session not found
+
+    const hasReached = session.dailyMessageCount >= DAILY_MESSAGE_LIMIT;
+
+    if (hasReached) {
+        console.log(`[SESSION-ROTATION] Session ${sessionId} reached daily limit (${session.dailyMessageCount}/${DAILY_MESSAGE_LIMIT})`);
+    }
+
+    return hasReached;
+}
+
+/**
+ * Increment daily message count
+ */
+export async function incrementDailyCount(sessionId: string): Promise<number> {
+    const session = await prisma.session.update({
+        where: { sessionId },
+        data: {
+            dailyMessageCount: { increment: 1 }
+        }
+    });
+
+    return session.dailyMessageCount;
+}
+
+// ========================================================
+// QUALITY SCORING (NEW)
+// ========================================================
+
+/**
+ * Update quality score berdasarkan hasil pengiriman
+ */
+export async function updateQualityScore(
+    sessionId: string,
+    success: boolean,
+    isSessionError: boolean = false
+): Promise<number> {
+    try {
+        const session = await prisma.session.findUnique({
+            where: { sessionId },
+            select: { qualityScore: true, consecutiveErrors: true }
+        });
+
+        if (!session) return 0;
+
+        let newScore = session.qualityScore || 100;
+        let newConsecutiveErrors = session.consecutiveErrors || 0;
+
+        if (success) {
+            // Success: add bonus, reset consecutive errors
+            newScore = Math.min(100, newScore + QUALITY_SUCCESS_BONUS);
+            newConsecutiveErrors = 0;
+        } else if (isSessionError) {
+            // Session error: heavy penalty
+            newScore = Math.max(0, newScore - QUALITY_SESSION_ERROR_PENALTY);
+            newConsecutiveErrors++;
+        } else {
+            // Regular error: moderate penalty
+            newScore = Math.max(0, newScore - QUALITY_ERROR_PENALTY);
+            newConsecutiveErrors++;
+        }
+
+        const updateData: any = {
+            qualityScore: newScore,
+            consecutiveErrors: newConsecutiveErrors
+        };
+
+        if (!success) {
+            updateData.lastErrorAt = new Date();
+        }
+
+        // Auto-pause session jika quality terlalu rendah
+        if (newScore < QUALITY_MIN_THRESHOLD) {
+            updateData.status = 'paused';
+            console.warn(`[SESSION-ROTATION] Session ${sessionId} paused due to low quality score (${newScore.toFixed(1)})`);
+        }
+
+        await prisma.session.update({
+            where: { sessionId },
+            data: updateData
+        });
+
+        console.log(`[SESSION-ROTATION] Quality score updated for ${sessionId}: ${newScore.toFixed(1)} (consecutive errors: ${newConsecutiveErrors})`);
+
+        return newScore;
+    } catch (error: any) {
+        console.warn(`[SESSION-ROTATION] Failed to update quality score:`, error.message);
+        return 0;
+    }
+}
+
+/**
+ * Get session dengan quality score tertinggi
+ */
+export async function getHealthiestSession(excludeSessionIds: string[] = []): Promise<any | null> {
+    await resetRestedSessions();
+    await resetDailyCountsIfNewDay();
+
+    const session = await prisma.session.findFirst({
+        where: {
+            status: { in: ACTIVE_STATUSES },
+            jobLimitReached: false,
+            dailyMessageCount: { lt: DAILY_MESSAGE_LIMIT },
+            qualityScore: { gte: QUALITY_MIN_THRESHOLD },
+            ...(excludeSessionIds.length > 0 && {
+                id: { notIn: excludeSessionIds }
+            }),
+            OR: [
+                { restingUntil: null },
+                { restingUntil: { lt: new Date() } }
+            ]
+        },
+        orderBy: [
+            { qualityScore: 'desc' },  // Prioritas quality tertinggi
+            { dailyMessageCount: 'asc' }, // Lalu yang paling sedikit bekerja hari ini
+            { jobCount: 'asc' }        // Lalu yang paling sedikit bekerja di periode ini
+        ]
+    });
+
+    if (session) {
+        console.log(`[SESSION-ROTATION] Healthiest session: ${session.name} (quality: ${session.qualityScore?.toFixed(1)}, daily: ${session.dailyMessageCount}/${DAILY_MESSAGE_LIMIT})`);
+    }
+
+    return session;
+}
+
+/**
+ * Check if contact is in cooldown (untuk hindari spam ke kontak yang sama)
+ */
+export async function isContactInCooldown(contactId: string): Promise<boolean> {
+    const contact = await prisma.contact.findUnique({
+        where: { id: contactId },
+        select: { cooldownUntil: true }
+    });
+
+    if (!contact?.cooldownUntil) return false;
+
+    return contact.cooldownUntil > new Date();
+}
+
+/**
+ * Set cooldown untuk kontak setelah dikirim pesan
+ */
+export async function setContactCooldown(contactId: string, hoursUntilCooldown: number = 24): Promise<void> {
+    const cooldownEnd = new Date(Date.now() + hoursUntilCooldown * 60 * 60 * 1000);
+
+    await prisma.contact.update({
+        where: { id: contactId },
+        data: {
+            lastMessageAt: new Date(),
+            messageCount: { increment: 1 },
+            cooldownUntil: cooldownEnd
+        }
+    });
+}
+
 export default {
     resetRestedSessions,
     isSessionAvailable,
@@ -281,6 +530,21 @@ export default {
     getStandbySessions,
     getWaitingMessagesCount,
     forceRedistributeWaitingMessages,
+    // New functions
+    isWithinBroadcastHours,
+    checkDailyLimit,
+    incrementDailyCount,
+    resetDailyCountsIfNewDay,
+    updateQualityScore,
+    getHealthiestSession,
+    isContactInCooldown,
+    setContactCooldown,
+    // Constants
     JOB_LIMIT,
-    REST_HOURS
+    REST_HOURS,
+    DAILY_MESSAGE_LIMIT,
+    BROADCAST_START_HOUR,
+    BROADCAST_END_HOUR,
+    QUALITY_MIN_THRESHOLD
 };
+

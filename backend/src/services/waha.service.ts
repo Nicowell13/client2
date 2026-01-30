@@ -382,7 +382,116 @@ class WahaService {
       throw new Error(`Failed to send message: ${msg}`);
     }
   }
+
+  // ===== Human-like Behavior (Anti-Ban) =====
+
+  /**
+   * Send typing indicator to simulate human typing
+   * @param sessionName - Session name
+   * @param phoneNumber - Target phone number
+   * @param durationMs - How long to show typing (will auto-stop)
+   */
+  async sendTypingIndicator(
+    sessionName: string,
+    phoneNumber: string,
+    durationMs: number = 3000
+  ): Promise<boolean> {
+    try {
+      // Start typing
+      await this.client.post('/api/startTyping', {
+        session: sessionName,
+        chatId: `${phoneNumber}@c.us`,
+      });
+
+      console.log(`[WAHA] Typing indicator started for ${phoneNumber} (${durationMs}ms)`);
+
+      // Wait for duration
+      await new Promise((r) => setTimeout(r, durationMs));
+
+      // Stop typing
+      await this.client.post('/api/stopTyping', {
+        session: sessionName,
+        chatId: `${phoneNumber}@c.us`,
+      });
+
+      return true;
+    } catch (error: any) {
+      // Non-fatal error - don't throw, just log
+      console.warn('[WAHA] Typing indicator failed:', error?.response?.data || error?.message);
+      return false;
+    }
+  }
+
+  /**
+   * Mark chat as seen (read receipt / blue tick)
+   * @param sessionName - Session name
+   * @param phoneNumber - Target phone number
+   */
+  async markChatAsSeen(sessionName: string, phoneNumber: string): Promise<boolean> {
+    try {
+      await this.client.post('/api/sendSeen', {
+        session: sessionName,
+        chatId: `${phoneNumber}@c.us`,
+      });
+
+      console.log(`[WAHA] Chat marked as seen: ${phoneNumber}`);
+      return true;
+    } catch (error: any) {
+      // Non-fatal error - don't throw, just log
+      console.warn('[WAHA] Mark seen failed:', error?.response?.data || error?.message);
+      return false;
+    }
+  }
+
+  /**
+   * Set presence/status (online, offline, typing, recording)
+   * @param sessionName - Session name
+   * @param state - Presence state
+   */
+  async setPresence(
+    sessionName: string,
+    state: 'available' | 'unavailable' = 'available'
+  ): Promise<boolean> {
+    try {
+      // WAHA Plus presence endpoint
+      await this.client.post('/api/setPresence', {
+        session: sessionName,
+        presence: state === 'available' ? 'online' : 'offline',
+      });
+
+      console.log(`[WAHA] Presence set to ${state} for session ${sessionName}`);
+      return true;
+    } catch (error: any) {
+      // Non-fatal error - don't throw, just log
+      console.warn('[WAHA] Set presence failed:', error?.response?.data || error?.message);
+      return false;
+    }
+  }
+
+  /**
+   * Check if a phone number is registered on WhatsApp
+   * Useful to avoid sending to invalid numbers
+   */
+  async checkNumberExists(sessionName: string, phoneNumber: string): Promise<boolean> {
+    try {
+      const response = await this.client.get('/api/checkNumberStatus', {
+        params: {
+          session: sessionName,
+          phone: phoneNumber,
+        },
+      });
+
+      const exists = response.data?.numberExists === true || response.data?.exists === true;
+      console.log(`[WAHA] Number ${phoneNumber} exists: ${exists}`);
+      return exists;
+    } catch (error: any) {
+      console.warn('[WAHA] Check number failed:', error?.response?.data || error?.message);
+      // Assume exists to avoid blocking - non-critical feature
+      return true;
+    }
+  }
 }
 
 const wahaService = new WahaService();
 export default wahaService;
+
