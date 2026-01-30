@@ -255,13 +255,21 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       // Get contact name for template replacement
       const contact = await prisma.contact.findUnique({
         where: { id: contactId },
-        select: { name: true }
+        select: { name: true, phoneNumber: true }
       });
 
       // Replace {{nama}} placeholder with actual contact name
+      // Fallback to phone number if name is empty
       let finalMessage = message;
-      if (contact?.name) {
-        finalMessage = message.replace(/\{\{nama\}\}/gi, contact.name);
+      const contactName = contact?.name?.trim() || contact?.phoneNumber || phoneNumber;
+
+      // Log untuk debugging
+      console.log(`[TEMPLATE] Contact: ${contactId}, Name: "${contact?.name}", Using: "${contactName}"`);
+
+      // Replace semua variasi {{nama}} (case insensitive)
+      if (message.includes('{{') && message.includes('}}')) {
+        finalMessage = message.replace(/\{\{nama\}\}/gi, contactName);
+        console.log(`[TEMPLATE] Original: "${message.substring(0, 50)}..." → Final: "${finalMessage.substring(0, 50)}..."`);
       }
 
       result = await wahaService.sendMessageWithButtons(

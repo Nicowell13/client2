@@ -67,16 +67,28 @@ function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumb
     const text = buffer.toString('utf8');
     const separator = detectSeparator(text);
 
+    // Debug: log first line to see headers
+    const firstLine = text.split(/\r?\n/)[0];
+    console.log(`[CSV-IMPORT] First line (headers): "${firstLine}"`);
+    console.log(`[CSV-IMPORT] Detected separator: "${separator}"`);
+
     const stream = Readable.from(text);
     stream
       .pipe(
         csv({
           separator,
-          mapHeaders: ({ header }) => normalizeHeader(header),
+          mapHeaders: ({ header }) => {
+            const normalized = normalizeHeader(header);
+            console.log(`[CSV-IMPORT] Header mapping: "${header}" → "${normalized}"`);
+            return normalized;
+          },
         })
       )
       .on('data', (row: any) => {
-        const name = row?.name || row?.nama || row?.fullname || row?.fullname || row?.contactname;
+        // Debug: log raw row
+        console.log(`[CSV-IMPORT] Raw row:`, JSON.stringify(row));
+
+        const nameRaw = row?.name || row?.nama || row?.fullname || row?.contactname || '';
         const phoneRaw =
           row?.phonenumber ||
           row?.phone ||
@@ -89,17 +101,27 @@ function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumb
           row?.msisdn;
         const emailRaw = row?.email || row?.mail;
 
-        if (name && phoneRaw) {
+        // Only require phone number - name can be empty (will use phone as fallback)
+        if (phoneRaw) {
           const phoneNumber = String(phoneRaw).replace(/\D/g, '');
           if (!phoneNumber) return;
+
+          // Use phone number as name fallback if name is empty
+          const name = String(nameRaw || phoneNumber).trim();
+
+          console.log(`[CSV-IMPORT] Parsed contact: name="${name}", phone="${phoneNumber}"`);
+
           contacts.push({
-            name: String(name).trim(),
+            name,
             phoneNumber,
             email: emailRaw ? String(emailRaw).trim() : null,
           });
         }
       })
-      .on('end', () => resolve(contacts))
+      .on('end', () => {
+        console.log(`[CSV-IMPORT] Total contacts parsed: ${contacts.length}`);
+        resolve(contacts);
+      })
       .on('error', (err: any) => reject(err));
   });
 }
