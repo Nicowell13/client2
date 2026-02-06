@@ -518,6 +518,93 @@ export async function setContactCooldown(contactId: string, hoursUntilCooldown: 
     });
 }
 
+// ========================================================
+// ROUND-ROBIN SESSION ROTATION (NEW)
+// ========================================================
+
+/**
+ * Get semua session yang healthy untuk round-robin
+ * Criteria: connected, not resting, below daily limit, quality score OK
+ */
+export async function getAllHealthySessions(): Promise<any[]> {
+    await resetRestedSessions();
+    await resetDailyCountsIfNewDay();
+
+    const sessions = await prisma.session.findMany({
+        where: {
+            status: { in: ACTIVE_STATUSES },
+            jobLimitReached: false,
+            dailyMessageCount: { lt: DAILY_MESSAGE_LIMIT },
+            qualityScore: { gte: QUALITY_MIN_THRESHOLD },
+            OR: [
+                { restingUntil: null },
+                { restingUntil: { lt: new Date() } }
+            ]
+        },
+        orderBy: [
+            { qualityScore: 'desc' },  // Prioritas quality tertinggi
+            { jobCount: 'asc' }        // Lalu yang paling sedikit bekerja
+        ]
+    });
+
+    console.log(`[SESSION-ROTATION] Found ${sessions.length} healthy sessions for round-robin`);
+    return sessions;
+}
+
+/**
+ * Get session untuk message tertentu menggunakan round-robin
+ * @param messageIndex - Index pesan (0, 1, 2, 3, ...)
+ * @param availableSessions - Array session yang sudah di-fetch (optional, untuk efisiensi)
+ * @returns Session untuk digunakan, atau null jika tidak ada yang available
+ */
+export async function getNextSessionRoundRobin(
+    messageIndex: number,
+    availableSessions?: any[]
+): Promise<any | null> {
+    // Gunakan sessions yang di-pass atau fetch baru
+    const sessions = availableSessions || await getAllHealthySessions();
+
+    if (sessions.length === 0) {
+        console.warn(`[SESSION-ROTATION] No healthy sessions available for round-robin`);
+        return null;
+    }
+
+    // Round-robin: pilih session berdasarkan index
+    const sessionIndex = messageIndex % sessions.length;
+    const selectedSession = sessions[sessionIndex];
+
+    console.log(`[SESSION-ROTATION] Round-robin message ${messageIndex} → session ${selectedSession.name} (index ${sessionIndex}/${sessions.length})`);
+
+    return selectedSession;
+}
+
+/**
+ * Get next available session jika current session unavailable
+ * Fallback yang mempertahankan round-robin pattern
+ */
+export async function getFailoverSession(
+    currentSessionId: string,
+    messageIndex: number
+): Promise<any | null> {
+    const sessions = await getAllHealthySessions();
+
+    // Filter out current (unavailable) session
+    const availableSessions = sessions.filter(s => s.sessionId !== currentSessionId);
+
+    if (availableSessions.length === 0) {
+        console.warn(`[SESSION-ROTATION] No failover sessions available`);
+        return null;
+    }
+
+    // Maintain round-robin pattern with available sessions
+    const sessionIndex = messageIndex % availableSessions.length;
+    const selectedSession = availableSessions[sessionIndex];
+
+    console.log(`[SESSION-ROTATION] Failover: ${currentSessionId} → ${selectedSession.name}`);
+
+    return selectedSession;
+}
+
 export default {
     resetRestedSessions,
     isSessionAvailable,
@@ -539,6 +626,10 @@ export default {
     getHealthiestSession,
     isContactInCooldown,
     setContactCooldown,
+    // Round-robin functions
+    getAllHealthySessions,
+    getNextSessionRoundRobin,
+    getFailoverSession,
     // Constants
     JOB_LIMIT,
     REST_HOURS,

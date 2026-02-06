@@ -261,12 +261,24 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     });
 
     /* ===========================================================
-       >>>>>>>>>>>>> AUTO SPLIT INTO 500-SIZE BATCHES <<<<<<<<<<<<<
+       >>>>>>>>>>>>>> ROUND-ROBIN SESSION ASSIGNMENT <<<<<<<<<<<<<<
     ============================================================ */
 
+    // Get all healthy sessions untuk round-robin
+    const healthySessions = await sessionRotation.getAllHealthySessions();
+
+    if (healthySessions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tidak ada session yang available. Semua session sedang resting, suspend, atau tidak terhubung.',
+      });
+    }
+
+    console.log(`[CAMPAIGN] Using ${healthySessions.length} sessions for round-robin: ${healthySessions.map(s => s.name).join(', ')}`);
+
+    // Batch configuration
     const BATCH_SIZE = 500;
     const batches = [];
-
     for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
       batches.push(contacts.slice(i, i + BATCH_SIZE));
     }
@@ -276,9 +288,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       url: b.url,
     }));
 
-    // One queue/worker per session for parallel sending across sessions
-    // Gunakan activeSession (hasil smart selection) bukan campaign.session
-    const campaignQueue = getCampaignQueue(activeSession.sessionId);
+    // Use global queue for all sessions
+    const campaignQueue = getCampaignQueue('global');
 
     for (let b = 0; b < batches.length; b++) {
       const batch = batches[b];
@@ -286,9 +297,14 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       for (let i = 0; i < batch.length; i++) {
         const c = batch[i];
 
-        // Sequential variant selection across all contacts with wrap-around
+        // Global index untuk round-robin dan variant selection
         const globalIndex = b * BATCH_SIZE + i;
+
+        // Sequential variant selection
         const selectedMessage = variants[globalIndex % variants.length];
+
+        // ⭐ ROUND-ROBIN: Pilih session berdasarkan global index
+        const selectedSession = healthySessions[globalIndex % healthySessions.length];
 
         await campaignQueue.add({
           campaignId: campaign.id,
@@ -297,7 +313,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           message: selectedMessage,
           imageUrl: campaign.imageUrl,
           buttons: btns,
-          sessionName: activeSession.sessionId, // WAHA SESSION NAME (dari smart selection)
+          sessionName: selectedSession.sessionId, // ⭐ Round-robin session
           messageIndex: i,
           batchIndex: b,
         });

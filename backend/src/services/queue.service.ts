@@ -36,8 +36,8 @@ interface CampaignJob {
 // ========================================================
 
 // Environment variable untuk kustomisasi delay
-const MESSAGE_DELAY_MIN_MS = Number(process.env.MESSAGE_DELAY_MIN_MS || 25000);
-const MESSAGE_DELAY_MAX_MS = Number(process.env.MESSAGE_DELAY_MAX_MS || 45000);
+const MESSAGE_DELAY_MIN_MS = Number(process.env.MESSAGE_DELAY_MIN_MS || 30000);
+const MESSAGE_DELAY_MAX_MS = Number(process.env.MESSAGE_DELAY_MAX_MS || 50000);
 const TYPING_INDICATOR_ENABLED = process.env.TYPING_INDICATOR_ENABLED !== 'false';
 const READ_RECEIPT_ENABLED = process.env.READ_RECEIPT_ENABLED !== 'false';
 
@@ -280,8 +280,10 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     });
 
     // ------------------------------------
-    // CHECK SESSION STATUS BEFORE SENDING
+    // CHECK SESSION STATUS BEFORE SENDING (WITH FAILOVER)
     // ------------------------------------
+    let activeSessionName = sessionName;
+
     try {
       const sessionStatus = await wahaService.getSessionStatus(sessionName);
       const normalizedStatus = (sessionStatus?.status || '').toLowerCase();
@@ -299,12 +301,30 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
           });
         }
 
-        throw new Error(`Session ${sessionName} is not active. Status: ${normalizedStatus}`);
+        // ⭐ TRY FAILOVER TO ANOTHER SESSION
+        console.log(`⚠ Session ${sessionName} not active (${normalizedStatus}), trying failover...`);
+        const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
+
+        if (failoverSession) {
+          activeSessionName = failoverSession.sessionId;
+          console.log(`✅ Failover success: ${sessionName} → ${activeSessionName}`);
+        } else {
+          throw new Error(`Session ${sessionName} is not active and no failover available. Status: ${normalizedStatus}`);
+        }
       }
     } catch (statusError: any) {
-      // If status check fails, session might be logged out
+      // If status check fails, try failover first
       console.warn(`⚠ Session ${sessionName} status check failed:`, statusError.message);
-      throw new Error(`Session ${sessionName} unavailable or logged out`);
+
+      // ⭐ TRY FAILOVER
+      const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
+
+      if (failoverSession) {
+        activeSessionName = failoverSession.sessionId;
+        console.log(`✅ Failover on error: ${sessionName} → ${activeSessionName}`);
+      } else {
+        throw new Error(`Session ${sessionName} unavailable and no failover available`);
+      }
     }
 
     // ------------------------------------
@@ -329,7 +349,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
       // 1. Set presence to available (online)
       try {
-        await wahaService.setPresence(sessionName, 'available');
+        await wahaService.setPresence(activeSessionName, 'available');
       } catch (presenceError: any) {
         console.warn(`[HUMAN] Presence set failed:`, presenceError.message);
       }
@@ -337,7 +357,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       // 2. Mark chat as seen (read receipt) - optional
       if (READ_RECEIPT_ENABLED) {
         try {
-          await wahaService.markChatAsSeen(sessionName, phoneNumber);
+          await wahaService.markChatAsSeen(activeSessionName, phoneNumber);
         } catch (seenError: any) {
           console.warn(`[HUMAN] Mark seen failed:`, seenError.message);
         }
@@ -348,7 +368,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
         // Duration berdasarkan panjang pesan (min 2s, max 8s)
         const typingDuration = Math.min(2000 + message.length * 30, 8000);
         try {
-          await wahaService.sendTypingIndicator(sessionName, phoneNumber, typingDuration);
+          await wahaService.sendTypingIndicator(activeSessionName, phoneNumber, typingDuration);
         } catch (typingError: any) {
           console.warn(`[HUMAN] Typing indicator failed:`, typingError.message);
         }
@@ -377,7 +397,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       // SEND THE MESSAGE
       // =========================================
       result = await wahaService.sendMessageWithButtons(
-        sessionName,
+        activeSessionName,
         phoneNumber,
         finalMessage,
         imageUrl,
@@ -411,9 +431,9 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     // INCREMENT SESSION JOB COUNT
     // ------------------------------------
     try {
-      const limitReached = await sessionRotation.incrementJobCount(sessionName);
+      const limitReached = await sessionRotation.incrementJobCount(activeSessionName);
       if (limitReached) {
-        console.log(`🛑 Session ${sessionName} reached job limit, will rest`);
+        console.log(`🛑 Session ${activeSessionName} reached job limit, will rest`);
       }
     } catch (jobCountError: any) {
       console.warn(`⚠ Failed to increment job count:`, jobCountError.message);
@@ -423,8 +443,8 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     // INCREMENT DAILY COUNT (ANTI-BAN)
     // ------------------------------------
     try {
-      const dailyCount = await sessionRotation.incrementDailyCount(sessionName);
-      console.log(`📊 Session ${sessionName} daily count: ${dailyCount}/${sessionRotation.DAILY_MESSAGE_LIMIT}`);
+      const dailyCount = await sessionRotation.incrementDailyCount(activeSessionName);
+      console.log(`📊 Session ${activeSessionName} daily count: ${dailyCount}/${sessionRotation.DAILY_MESSAGE_LIMIT}`);
     } catch (dailyError: any) {
       console.warn(`⚠ Failed to increment daily count:`, dailyError.message);
     }
@@ -433,7 +453,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     // UPDATE QUALITY SCORE (SUCCESS)
     // ------------------------------------
     try {
-      await sessionRotation.updateQualityScore(sessionName, true, false);
+      await sessionRotation.updateQualityScore(activeSessionName, true, false);
     } catch (qualityError: any) {
       console.warn(`⚠ Failed to update quality score:`, qualityError.message);
     }
