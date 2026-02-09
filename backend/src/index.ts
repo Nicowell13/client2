@@ -17,6 +17,7 @@ import { errorHandler } from './middleware/errorHandler';
 // Services
 import { scheduleAutoRecovery } from './services/campaign-recovery.service';
 import { startSessionMonitor } from './services/session-monitor.service';
+import sessionRotation from './services/session-rotation.service';
 
 dotenv.config();
 
@@ -81,6 +82,19 @@ httpServer.listen(PORT, () => {
   // Start real-time session monitor (runs every 30 seconds)
   console.log('👁️ Starting real-time session monitor...');
   startSessionMonitor(30000); // 30 seconds = 30000ms
+
+  // Start waiting messages redistribution scheduler (runs every 60 seconds)
+  console.log('🔄 Starting waiting messages redistributor...');
+  setInterval(async () => {
+    try {
+      const redistributed = await sessionRotation.forceRedistributeWaitingMessages();
+      if (redistributed > 0) {
+        console.log(`✅ Auto-redistributed ${redistributed} waiting messages`);
+      }
+    } catch (err: any) {
+      console.error('❌ Waiting messages redistribution error:', err.message);
+    }
+  }, 60000); // 60 seconds = 60000ms
 });
 
 export default app;

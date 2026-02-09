@@ -581,18 +581,66 @@ export async function getNextSessionRoundRobin(
 /**
  * Get next available session jika current session unavailable
  * Fallback yang mempertahankan round-robin pattern
+ * ⭐ IMPROVED: Sync status dengan WAHA sebelum failover
  */
 export async function getFailoverSession(
     currentSessionId: string,
     messageIndex: number
 ): Promise<any | null> {
-    const sessions = await getAllHealthySessions();
+    // First, try with cached healthy sessions
+    let sessions = await getAllHealthySessions();
+    let availableSessions = sessions.filter(s => s.sessionId !== currentSessionId);
 
-    // Filter out current (unavailable) session
-    const availableSessions = sessions.filter(s => s.sessionId !== currentSessionId);
+    // If no sessions available from cache, try syncing status from WAHA
+    if (availableSessions.length === 0) {
+        console.log(`[SESSION-ROTATION] No cached healthy sessions, syncing with WAHA...`);
+
+        // Import wahaService dynamically to avoid circular dependency
+        const wahaService = (await import('./waha.service')).default;
+
+        // Get ALL sessions from database (regardless of status)
+        const allSessions = await prisma.session.findMany({
+            where: {
+                NOT: { sessionId: currentSessionId }
+            }
+        });
+
+        // Check each session's live status from WAHA
+        const liveChecks = await Promise.all(
+            allSessions.map(async (session) => {
+                try {
+                    const wahaStatus = await wahaService.getSessionStatus(session.sessionId);
+                    const normalizedStatus = (wahaStatus?.status || '').toLowerCase();
+                    const isWorking = ['working', 'ready', 'authenticated'].includes(normalizedStatus);
+
+                    // Update database with live status
+                    if (isWorking) {
+                        await prisma.session.update({
+                            where: { id: session.id },
+                            data: { status: 'working' }
+                        });
+                        console.log(`[SESSION-ROTATION] Synced ${session.name}: ${normalizedStatus} (now available)`);
+                        return { ...session, status: 'working', isAvailable: true };
+                    } else {
+                        await prisma.session.update({
+                            where: { id: session.id },
+                            data: { status: normalizedStatus || 'stopped' }
+                        });
+                    }
+                } catch (err: any) {
+                    console.warn(`[SESSION-ROTATION] Failed to check ${session.sessionId}:`, err.message);
+                }
+                return { ...session, isAvailable: false };
+            })
+        );
+
+        // Filter sessions that are actually working
+        availableSessions = liveChecks.filter(s => s.isAvailable);
+        console.log(`[SESSION-ROTATION] Live check found ${availableSessions.length} working sessions`);
+    }
 
     if (availableSessions.length === 0) {
-        console.warn(`[SESSION-ROTATION] No failover sessions available`);
+        console.warn(`[SESSION-ROTATION] No failover sessions available after live check`);
         return null;
     }
 
@@ -600,7 +648,7 @@ export async function getFailoverSession(
     const sessionIndex = messageIndex % availableSessions.length;
     const selectedSession = availableSessions[sessionIndex];
 
-    console.log(`[SESSION-ROTATION] Failover: ${currentSessionId} → ${selectedSession.name}`);
+    console.log(`[SESSION-ROTATION] Failover: ${currentSessionId} → ${selectedSession.name || selectedSession.sessionId}`);
 
     return selectedSession;
 }
