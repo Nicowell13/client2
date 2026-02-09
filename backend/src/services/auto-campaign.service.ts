@@ -227,22 +227,31 @@ async function sendCampaignWithFailover(
         const globalIndex = b * BATCH_SIZE + i;
         const selectedMessage = variants[globalIndex % variants.length];
 
-        await campaignQueue.add({
-          campaignId: campaign.id,
-          contactId: c.id,
-          phoneNumber: c.phoneNumber,
-          message: selectedMessage,
-          imageUrl: campaign.imageUrl,
-          buttons: btns,
-          sessionName: currentSession.sessionId,
-          messageIndex: i,
-          batchIndex: b,
-        }, {
-          // ⭐ Unique jobId prevents duplicate jobs
-          jobId: `${campaign.id}_${c.id}`,
-          removeOnComplete: 100,
-          removeOnFail: 50,
-        });
+        try {
+          await campaignQueue.add({
+            campaignId: campaign.id,
+            contactId: c.id,
+            phoneNumber: c.phoneNumber,
+            message: selectedMessage,
+            imageUrl: campaign.imageUrl,
+            buttons: btns,
+            sessionName: currentSession.sessionId,
+            messageIndex: i,
+            batchIndex: b,
+          }, {
+            // ⭐ Unique jobId prevents duplicate jobs
+            jobId: `${campaign.id}_${c.id}`,
+            removeOnComplete: 100,
+            removeOnFail: 50,
+          });
+        } catch (queueError: any) {
+          console.error(`[AUTO-CAMPAIGN] Failed to add job to queue (Redis error?):`, queueError.message);
+
+          if (queueError.message?.includes('OOM') || queueError.message?.includes('memory')) {
+            throw new Error('Redis memory full - cannot queue more messages. Please upgrade server or clear Redis.');
+          }
+          throw queueError;
+        }
       }
     }
 

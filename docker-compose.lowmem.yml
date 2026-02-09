@@ -51,11 +51,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 64M
+          memory: 128M
         reservations:
-          memory: 32M
-    # Redis config untuk low memory - PREVENT READONLY MODE
-    command: redis-server --maxmemory 50mb --maxmemory-policy allkeys-lru --stop-writes-on-bgsave-error no --save ""
+          memory: 64M
+          
+    # Redis config: 100MB RAM, No Eviction (Safe for Queues)
+    command: redis-server --maxmemory 100mb --maxmemory-policy noeviction --stop-writes-on-bgsave-error no --save ""
 
   # WAHA Plus with NOWEB engine (lightweight)
   waha:

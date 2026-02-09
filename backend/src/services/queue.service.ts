@@ -791,6 +791,11 @@ export function getCampaignQueue(sessionName: string) {
 
   // ⭐ Create single global queue for ALL sessions
   globalQueue = new Bull<CampaignJob>(GLOBAL_QUEUE_NAME, REDIS_URL, {
+    // Fix for MaxRetriesPerRequestError
+    redis: {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    },
     defaultJobOptions: {
       removeOnComplete: true,
       removeOnFail: false,
