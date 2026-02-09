@@ -176,14 +176,26 @@ async function sendCampaignWithFailover(
     }
 
     // Update campaign to use current session
-    await prisma.campaign.update({
-      where: { id: campaign.id },
-      data: {
-        sessionId: currentSession.id,
-        status: 'sending',
-        totalContacts: contacts.length,
-      },
-    });
+    try {
+      await prisma.campaign.update({
+        where: { id: campaign.id },
+        data: {
+          sessionId: currentSession.id,
+          status: 'sending',
+          totalContacts: contacts.length,
+        },
+      });
+    } catch (dbError: any) {
+      if (dbError.code === 'P2025' || dbError.message?.includes('Record to update not found')) {
+        console.error(`[AUTO-CAMPAIGN] Campaign ${campaign.id} not found during update (likely deleted). Aborting.`);
+        return {
+          success: false,
+          sessionUsed: currentSession,
+          error: 'Campaign not found (deleted)',
+        };
+      }
+      throw dbError; // Re-throw other errors to be handled by the outer catch
+    }
 
     // Create message placeholder rows
     await prisma.message.createMany({
@@ -244,6 +256,15 @@ async function sendCampaignWithFailover(
     };
   } catch (error: any) {
     console.error(`[AUTO-CAMPAIGN] Error sending campaign ${campaign.id}:`, error);
+
+    // 🛑 ABORT FAILOVER IF CAMPAIGN IS MISSING
+    if (error.code === 'P2025' || error.message?.includes('Record to update not found') || error.message?.includes('Campaign not found')) {
+      return {
+        success: false,
+        sessionUsed: currentSession,
+        error: 'Campaign not found (deleted)',
+      };
+    }
 
     // Try failover to next session
     const nextSession = await findNextActiveSession(currentSession.sessionId, allSessions);
