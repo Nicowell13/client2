@@ -8,6 +8,12 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
   try {
     const { event, session, payload } = req.body;
 
+    // 🛑 SILENTLY IGNORE INCOMING MESSAGES to save resources
+    // These events are heavy and coming from group chats
+    if (event === 'message' || event === 'message.any') {
+      return res.json({ success: true });
+    }
+
     console.log('Webhook received:', { event, session, payload });
 
     // Handle session status updates
@@ -43,7 +49,7 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
       // Update message status based on ack
       const ackStatus = payload.ack;
       let status = 'sent';
-      
+
       if (ackStatus === 2) status = 'delivered';
       if (ackStatus === 3) status = 'read';
 
