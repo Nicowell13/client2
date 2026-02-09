@@ -225,6 +225,11 @@ async function sendCampaignWithFailover(
           sessionName: currentSession.sessionId,
           messageIndex: i,
           batchIndex: b,
+        }, {
+          // ⭐ Unique jobId prevents duplicate jobs
+          jobId: `${campaign.id}_${c.id}`,
+          removeOnComplete: 100,
+          removeOnFail: 50,
         });
       }
     }

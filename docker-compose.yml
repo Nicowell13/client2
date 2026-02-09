@@ -28,6 +28,8 @@ services:
     networks:
       - whatsapp-network
     restart: unless-stopped
+    # Prevent READONLY mode when memory is low
+    command: redis-server --maxmemory 100mb --maxmemory-policy allkeys-lru --stop-writes-on-bgsave-error no
 
   # WAHA Plus (WhatsApp HTTP API - Premium Version)
   waha:

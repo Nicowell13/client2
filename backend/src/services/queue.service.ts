@@ -152,46 +152,82 @@ async function getRedisClient(): Promise<any> {
 async function acquireGlobalSendSlot() {
   if (!Number.isFinite(GLOBAL_SEND_CONCURRENCY) || GLOBAL_SEND_CONCURRENCY <= 0) return;
 
-  const client = await getRedisClient();
+  try {
+    const client = await getRedisClient();
 
-  // Atomically: INCR, if above limit then DECR and fail.
-  const lua = `
-    local key = KEYS[1]
-    local limit = tonumber(ARGV[1])
-    local ttl = tonumber(ARGV[2])
-    local new = redis.call('incr', key)
-    if new > limit then
-      redis.call('decr', key)
-      return 0
-    end
-    redis.call('pexpire', key, ttl)
-    return new
-  `;
+    // Atomically: INCR, if above limit then DECR and fail.
+    const lua = `
+      local key = KEYS[1]
+      local limit = tonumber(ARGV[1])
+      local ttl = tonumber(ARGV[2])
+      local new = redis.call('incr', key)
+      if new > limit then
+        redis.call('decr', key)
+        return 0
+      end
+      redis.call('pexpire', key, ttl)
+      return new
+    `;
 
-  while (true) {
-    const res = await client.eval(lua, 1, GLOBAL_SEND_KEY, String(GLOBAL_SEND_CONCURRENCY), String(GLOBAL_SEND_TTL_MS));
-    if (Number(res) > 0) return;
-    // Small jitter so multiple workers don't thundering-herd.
-    await sleep(random(200, 500));
+    let attempts = 0;
+    const maxAttempts = 60; // Max 30 seconds (60 * 500ms)
+
+    while (attempts < maxAttempts) {
+      try {
+        const res = await client.eval(lua, 1, GLOBAL_SEND_KEY, String(GLOBAL_SEND_CONCURRENCY), String(GLOBAL_SEND_TTL_MS));
+        if (Number(res) > 0) return;
+        // Small jitter so multiple workers don't thundering-herd.
+        await sleep(random(200, 500));
+        attempts++;
+      } catch (luaError: any) {
+        // Handle READONLY error - Redis is in read-only mode (memory full or replica)
+        if (luaError?.message?.includes('READONLY')) {
+          console.warn('⚠️ [REDIS] Redis is in READONLY mode - skipping rate limit, proceeding with send');
+          return; // Continue without rate limiting
+        }
+        throw luaError;
+      }
+    }
+
+    // If we exhaust attempts, proceed anyway with warning
+    console.warn('⚠️ [REDIS] Could not acquire send slot after max attempts - proceeding anyway');
+  } catch (error: any) {
+    // If Redis is completely unavailable or in READONLY mode, proceed without limiting
+    if (error?.message?.includes('READONLY') || error?.message?.includes('ECONNREFUSED')) {
+      console.warn('⚠️ [REDIS] Redis unavailable or READONLY - skipping rate limit');
+      return;
+    }
+    console.error('❌ [REDIS] acquireGlobalSendSlot error:', error?.message);
+    // Proceed anyway to avoid stuck queue
   }
 }
 
 async function releaseGlobalSendSlot() {
   if (!Number.isFinite(GLOBAL_SEND_CONCURRENCY) || GLOBAL_SEND_CONCURRENCY <= 0) return;
 
-  const client = await getRedisClient();
+  try {
+    const client = await getRedisClient();
 
-  const lua = `
-    local key = KEYS[1]
-    local val = redis.call('decr', key)
-    if val <= 0 then
-      redis.call('del', key)
-      return 0
-    end
-    return val
-  `;
+    const lua = `
+      local key = KEYS[1]
+      local val = redis.call('decr', key)
+      if val <= 0 then
+        redis.call('del', key)
+        return 0
+      end
+      return val
+    `;
 
-  await client.eval(lua, 1, GLOBAL_SEND_KEY);
+    await client.eval(lua, 1, GLOBAL_SEND_KEY);
+  } catch (error: any) {
+    // If Redis is in READONLY mode or unavailable, just log and continue
+    if (error?.message?.includes('READONLY') || error?.message?.includes('ECONNREFUSED')) {
+      console.warn('⚠️ [REDIS] Cannot release send slot - Redis READONLY or unavailable');
+      return;
+    }
+    console.error('❌ [REDIS] releaseGlobalSendSlot error:', error?.message);
+    // Continue anyway - don't block the queue
+  }
 }
 
 async function processCampaignJob(job: Bull.Job<CampaignJob>) {
@@ -219,6 +255,26 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     if (!existingCampaign) {
       console.warn(`⚠ Campaign ${campaignId} missing; skipping job send`);
       return { success: false, skipped: true, reason: 'campaign-missing' };
+    }
+
+    // ------------------------------------
+    // ⭐ DEDUPLICATION: SKIP IF ALREADY SENT
+    // Prevents duplicate sends from recovery/retry
+    // ------------------------------------
+    const messageRecord = await prisma.message.findFirst({
+      where: { campaignId, contactId },
+      select: { id: true, status: true, waMessageId: true }
+    });
+
+    if (messageRecord?.status === 'sent' && messageRecord?.waMessageId) {
+      console.warn(`⚠ Message ${campaignId}/${contactId} already SENT (waId: ${messageRecord.waMessageId}); skipping duplicate`);
+      return { success: true, skipped: true, reason: 'already-sent' };
+    }
+
+    // Also skip if message record doesn't exist (might have been deleted)
+    if (!messageRecord) {
+      console.warn(`⚠ Message record for ${campaignId}/${contactId} not found; skipping`);
+      return { success: false, skipped: true, reason: 'message-missing' };
     }
 
     // ------------------------------------

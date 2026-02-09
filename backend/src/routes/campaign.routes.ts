@@ -316,6 +316,11 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           sessionName: selectedSession.sessionId, // ⭐ Round-robin session
           messageIndex: i,
           batchIndex: b,
+        }, {
+          // ⭐ Unique jobId prevents duplicate jobs
+          jobId: `${campaign.id}_${c.id}`,
+          removeOnComplete: 100,
+          removeOnFail: 50,
         });
       }
     }

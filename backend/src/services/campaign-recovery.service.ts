@@ -204,6 +204,9 @@ async function reassignCampaign(
         for (const msg of pendingMessages) {
             const selectedMessage = variants[messageIndex % variants.length];
 
+            // ⭐ Use unique jobId to prevent duplicate jobs in queue
+            const jobId = `${campaign.id}_${msg.contact.id}`;
+
             await campaignQueue.add({
                 campaignId: campaign.id,
                 contactId: msg.contact.id,
@@ -214,6 +217,11 @@ async function reassignCampaign(
                 sessionName: newSession.sessionId,
                 messageIndex: messageIndex,
                 batchIndex: batchIndex,
+            }, {
+                // Prevent duplicate jobs with same jobId
+                jobId: jobId,
+                removeOnComplete: 100, // Keep last 100 completed jobs
+                removeOnFail: 50,      // Keep last 50 failed jobs
             });
 
             messageIndex++;
