@@ -28,8 +28,8 @@ const QUALITY_ERROR_PENALTY = 5;      // Point lost per error
 const QUALITY_SESSION_ERROR_PENALTY = 20; // Point lost per session error
 const QUALITY_MIN_THRESHOLD = 50;     // Below this, session is paused
 
-// Status session yang dianggap aktif/connected
-const ACTIVE_STATUSES = ['working', 'ready', 'authenticated'];
+// Status session yang dianggap aktif/connected (both lowercase and uppercase for WAHA compatibility)
+const ACTIVE_STATUSES = ['working', 'ready', 'authenticated', 'WORKING', 'READY', 'AUTHENTICATED'];
 
 /**
  * Reset session yang sudah selesai istirahat
