@@ -254,11 +254,24 @@ async function sendCampaignWithFailover(
       return await sendCampaignWithFailover(campaign, nextSession, allSessions);
     }
 
-    // Update campaign status to failed
-    await prisma.campaign.update({
-      where: { id: campaign.id },
-      data: { status: 'failed' },
-    });
+    // ⭐ SAFE UPDATE: Check if campaign still exists before updating
+    try {
+      const campaignExists = await prisma.campaign.findUnique({
+        where: { id: campaign.id },
+        select: { id: true }
+      });
+
+      if (campaignExists) {
+        await prisma.campaign.update({
+          where: { id: campaign.id },
+          data: { status: 'failed' },
+        });
+      } else {
+        console.warn(`[AUTO-CAMPAIGN] Campaign ${campaign.id} no longer exists, skipping status update`);
+      }
+    } catch (updateError: any) {
+      console.warn(`[AUTO-CAMPAIGN] Failed to update campaign status:`, updateError.message);
+    }
 
     return {
       success: false,
