@@ -457,4 +457,50 @@ router.post('/recover', async (_req: Request, res: Response) => {
   }
 });
 
+/* ===========================================================
+ CLEAR STUCK QUEUE (EMERGENCY RESET)
+=========================================================== */
+router.post('/clear-queue', async (_req: Request, res: Response) => {
+  try {
+    const campaignQueue = getCampaignQueue('global');
+
+    // Get queue stats before clearing
+    const waiting = await campaignQueue.getWaitingCount();
+    const active = await campaignQueue.getActiveCount();
+    const delayed = await campaignQueue.getDelayedCount();
+    const failed = await campaignQueue.getFailedCount();
+
+    console.log(`[QUEUE] Before clear: waiting=${waiting}, active=${active}, delayed=${delayed}, failed=${failed}`);
+
+    // Clear all jobs
+    await campaignQueue.empty();
+    await campaignQueue.clean(0, 'delayed');
+    await campaignQueue.clean(0, 'wait');
+    await campaignQueue.clean(0, 'active');
+    await campaignQueue.clean(0, 'completed');
+    await campaignQueue.clean(0, 'failed');
+
+    console.log('[QUEUE] Queue cleared successfully');
+
+    return res.json({
+      success: true,
+      message: 'Queue cleared successfully',
+      data: {
+        clearedJobs: {
+          waiting,
+          active,
+          delayed,
+          failed
+        }
+      }
+    });
+  } catch (error: any) {
+    console.error('[QUEUE][CLEAR]', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to clear queue',
+    });
+  }
+});
+
 export default router;
