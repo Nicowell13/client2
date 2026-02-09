@@ -83,8 +83,8 @@ services:
       # NOWEB engine - PALING RINGAN!
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
       
-      # Webhook
-      - WHATSAPP_HOOK_EVENTS=message,message.any,state.change,session.status
+      # Webhook - Removed 'message' and 'message.any' to save resources
+      - WHATSAPP_HOOK_EVENTS=state.change,session.status,message.ack
       - WHATSAPP_HOOK_URL=http://backend:4000/webhook/whatsapp
       
       # Files
