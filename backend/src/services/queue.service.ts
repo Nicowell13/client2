@@ -61,6 +61,11 @@ function getTimeMultiplier(): number {
 }
 
 function calcMessageDelay(index: number): number {
+  // ⭐ FIRST MESSAGE: No delay to start campaign quickly
+  if (index === 0) {
+    return random(1000, 3000); // Just 1-3 seconds for first message
+  }
+
   // Base delay yang lebih tinggi untuk anti-ban
   const base = random(MESSAGE_DELAY_MIN_MS, MESSAGE_DELAY_MAX_MS);
 
@@ -170,7 +175,7 @@ async function acquireGlobalSendSlot() {
     `;
 
     let attempts = 0;
-    const maxAttempts = 60; // Max 30 seconds (60 * 500ms)
+    const maxAttempts = 20; // Max 10 seconds (20 * 500ms) - reduced from 60
 
     while (attempts < maxAttempts) {
       try {
