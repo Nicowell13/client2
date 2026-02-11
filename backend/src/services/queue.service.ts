@@ -483,8 +483,8 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
       // - Fingerprint → invisible variations
       const finalMessage = contentVariation.processMessageTemplate(message, contact);
 
-      // Log untuk debugging - termasuk info nama kontak
-      console.log(`[CONTENT] Contact: id=${contact.id}, name="${contact.name}", phone="${contact.phoneNumber}"`);
+      // Log untuk debugging - termasuk info nama kontak dan session yang mengirim
+      console.log(`[SEND] [${activeSessionName}] Processing message for ${contact.phoneNumber} (Contact: ${contact.name})`);
       console.log(`[CONTENT] Original: "${message.substring(0, 60)}..."`);
       console.log(`[CONTENT] Final: "${finalMessage.substring(0, 60)}..."`);
 
