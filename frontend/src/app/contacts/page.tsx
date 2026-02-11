@@ -262,9 +262,8 @@ export default function ContactsPage() {
           <h2 className="text-xl font-semibold mb-4">Upload CSV</h2>
           <div
             {...getRootProps()}
-            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              isDragActive ? 'border-green-600 bg-green-50' : 'border-gray-300 hover:border-green-600'
-            }`}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragActive ? 'border-green-600 bg-green-50' : 'border-gray-300 hover:border-green-600'
+              }`}
           >
             <input {...getInputProps()} />
             <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
@@ -339,7 +338,7 @@ export default function ContactsPage() {
         <div className="bg-white rounded-lg shadow">
           <div className="p-6 border-b">
             <h2 className="text-xl font-semibold">
-              All Contacts ({pagination?.total ?? contacts.length})
+              All Contacts ({pagination?.total ?? contacts.length}/40)
             </h2>
           </div>
           {loading ? (

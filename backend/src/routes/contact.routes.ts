@@ -6,6 +6,7 @@ import csv from 'csv-parser';
 import { Readable } from 'stream';
 import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
+import { SESSION_CONTACT_LIMIT } from '../services/session-rotation.service';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -157,6 +158,9 @@ router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'fi
     const perFile: Array<{ filename: string; imported: number }> = [];
     let totalImported = 0;
 
+    // Get current contact count for this session
+    const currentCount = await prisma.contact.count({ where: { sessionId } });
+
     for (const f of files) {
       const parsed = await parseCsvBuffer(f.buffer);
 
@@ -164,6 +168,15 @@ router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'fi
         perFile.push({ filename: f.originalname, imported: 0 });
         continue;
       }
+
+      // Check if adding these contacts exceeds the limit
+      if (currentCount + totalImported + parsed.length > SESSION_CONTACT_LIMIT) {
+        return res.status(400).json({
+          success: false,
+          message: `Limit exceeded. Maksimal ${SESSION_CONTACT_LIMIT} kontak per season. Sisa kuota: ${SESSION_CONTACT_LIMIT - (currentCount + totalImported)}`,
+        });
+      }
+
       const result = await Promise.all(
         parsed.map((contact) =>
           prisma.contact.upsert({
@@ -288,6 +301,15 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         message: 'Name, phone number, and sessionId are required',
+      });
+    }
+
+    // Check contact limit
+    const currentCount = await prisma.contact.count({ where: { sessionId } });
+    if (currentCount >= SESSION_CONTACT_LIMIT) {
+      return res.status(400).json({
+        success: false,
+        message: `Limit exceeded. Maksimal ${SESSION_CONTACT_LIMIT} kontak per season.`,
       });
     }
 

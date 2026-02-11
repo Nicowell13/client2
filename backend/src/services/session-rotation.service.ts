@@ -14,9 +14,10 @@
 import prisma from '../lib/prisma';
 
 // Konfigurasi dari environment variables
-const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 50);
+export const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 40);
 const SESSION_REST_TRIGGER = Number(process.env.SESSION_REST_TRIGGER || 30);
 const REST_MINUTES = Number(process.env.SESSION_REST_MINUTES || 30);
+export const SESSION_CONTACT_LIMIT = Number(process.env.SESSION_CONTACT_LIMIT || 40);
 
 // Daily limit dan broadcast hours
 const DAILY_MESSAGE_LIMIT = Number(process.env.DAILY_MESSAGE_LIMIT || 40);
@@ -36,10 +37,15 @@ const ACTIVE_STATUSES = ['working', 'ready', 'authenticated', 'WORKING', 'READY'
  * Reset session yang sudah selesai istirahat
  */
 export async function resetRestedSessions(): Promise<number> {
-    const result = await prisma.session.updateMany({
+    const now = new Date();
+
+    // 1. Reset sessions yang SELESAI season (mencapai JOB_LIMIT)
+    // Beri istirahat selesai + reset jobCount ke 0
+    const resetSeason = await prisma.session.updateMany({
         where: {
-            restingUntil: { lt: new Date() },
-            jobLimitReached: true
+            restingUntil: { lt: now },
+            jobLimitReached: true,
+            jobCount: { gte: JOB_LIMIT }
         },
         data: {
             jobLimitReached: false,
@@ -48,11 +54,27 @@ export async function resetRestedSessions(): Promise<number> {
         }
     });
 
-    if (result.count > 0) {
-        console.log(`[SESSION-ROTATION] Reset ${result.count} rested sessions`);
+    // 2. Reset sessions yang hanya MID-SEASON rest (misal: 30 jobs trigger)
+    // Beri istirahat selesai tapi JANGAN reset jobCount (lanjut ke 50)
+    const resetMidSeason = await prisma.session.updateMany({
+        where: {
+            restingUntil: { lt: now },
+            jobLimitReached: true,
+            jobCount: { lt: JOB_LIMIT }
+        },
+        data: {
+            jobLimitReached: false,
+            // jobCount tetap (tidak di-reset)
+            restingUntil: null
+        }
+    });
+
+    const totalReset = resetSeason.count + resetMidSeason.count;
+    if (totalReset > 0) {
+        console.log(`[SESSION-ROTATION] Reset ${totalReset} rested sessions (${resetSeason.count} full season, ${resetMidSeason.count} mid-season)`);
     }
 
-    return result.count;
+    return totalReset;
 }
 
 /**
@@ -86,6 +108,7 @@ export async function getBestAvailableSession(excludeSessionIds: string[] = []):
         where: {
             status: { in: ACTIVE_STATUSES },
             jobLimitReached: false,
+            dailyMessageCount: { lt: DAILY_MESSAGE_LIMIT },
             ...(excludeSessionIds.length > 0 && {
                 id: { notIn: excludeSessionIds }
             }),
@@ -114,6 +137,7 @@ export async function getAllAvailableSessions(): Promise<any[]> {
         where: {
             status: { in: ACTIVE_STATUSES },
             jobLimitReached: false,
+            dailyMessageCount: { lt: DAILY_MESSAGE_LIMIT },
             OR: [
                 { restingUntil: null },
                 { restingUntil: { lt: new Date() } }
@@ -652,9 +676,18 @@ export async function getFailoverSession(
             })
         );
 
-        // Filter sessions that are actually working
-        availableSessions = liveChecks.filter(s => s.isAvailable);
-        console.log(`[SESSION-ROTATION] Live check found ${availableSessions.length} working sessions`);
+        // Filter sessions that are actually working AND not resting/limit
+        availableSessions = liveChecks.filter(s => {
+            if (!s.isAvailable) return false;
+
+            // ⭐ CRITICAL check: Must not be resting and must be under daily limit
+            const isNotResting = !s.jobLimitReached &&
+                (!s.restingUntil || new Date(s.restingUntil) < new Date());
+            const underDailyLimit = (s.dailyMessageCount || 0) < DAILY_MESSAGE_LIMIT;
+
+            return isNotResting && underDailyLimit;
+        });
+        console.log(`[SESSION-ROTATION] Live check found ${availableSessions.length} truly available sessions`);
     }
 
     if (availableSessions.length === 0) {
@@ -700,6 +733,7 @@ export default {
     JOB_LIMIT,
     SESSION_REST_TRIGGER,
     REST_MINUTES,
+    SESSION_CONTACT_LIMIT,
     DAILY_MESSAGE_LIMIT,
     BROADCAST_START_HOUR,
     BROADCAST_END_HOUR,

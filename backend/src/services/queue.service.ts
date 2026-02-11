@@ -338,9 +338,46 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     });
 
     // ------------------------------------
-    // CHECK SESSION STATUS BEFORE SENDING (WITH FAILOVER)
+    // ⭐ CHECK IF SESSION IS RESTING (CRITICAL)
+    // If session reached job limit trigger, failover to another session
     // ------------------------------------
     let activeSessionName = sessionName;
+
+    try {
+      const sessionRecord = await prisma.session.findFirst({
+        where: { sessionId: sessionName },
+        select: { id: true, jobLimitReached: true, restingUntil: true, name: true }
+      });
+
+      if (sessionRecord?.jobLimitReached && sessionRecord?.restingUntil && sessionRecord.restingUntil > new Date()) {
+        console.log(`☕ Session ${sessionName} is RESTING until ${sessionRecord.restingUntil.toISOString()}, looking for failover...`);
+
+        const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
+
+        if (failoverSession) {
+          activeSessionName = failoverSession.sessionId;
+          console.log(`✅ Resting failover: ${sessionName} → ${activeSessionName}`);
+        } else {
+          // No other session available - mark as waiting for later
+          console.log(`⏳ No failover available, marking message as waiting`);
+          await prisma.message.updateMany({
+            where: { campaignId, contactId, status: 'pending' },
+            data: {
+              status: 'waiting',
+              errorMsg: `Session ${sessionName} resting, no other session available`
+            }
+          });
+          return { success: false, waiting: true, reason: 'session-resting-no-failover' };
+        }
+      }
+    } catch (restingCheckError: any) {
+      console.warn(`⚠ Resting check failed for ${sessionName}:`, restingCheckError.message);
+      // Continue with original session if check fails
+    }
+
+    // ------------------------------------
+    // CHECK SESSION STATUS BEFORE SENDING (WITH FAILOVER)
+    // ------------------------------------
 
     try {
       const sessionStatus = await wahaService.getSessionStatus(sessionName);
