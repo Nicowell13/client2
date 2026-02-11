@@ -133,11 +133,12 @@ services:
       # Anti-Ban: Rate limiting
       - DAILY_MESSAGE_LIMIT=60
       - SESSION_JOB_LIMIT=50
-      - SESSION_REST_HOURS=1
+      - SESSION_REST_TRIGGER=30
+      - SESSION_REST_MINUTES=30
       
       # Anti-Ban: Message delays
-      - MESSAGE_DELAY_MIN_MS=25000
-      - MESSAGE_DELAY_MAX_MS=45000
+      - MESSAGE_DELAY_MIN_MS=30000
+      - MESSAGE_DELAY_MAX_MS=60000
       
       # Anti-Ban: Human-like behavior
       - TYPING_INDICATOR_ENABLED=true

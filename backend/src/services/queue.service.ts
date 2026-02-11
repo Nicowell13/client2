@@ -66,25 +66,22 @@ function calcMessageDelay(index: number): number {
     return random(1000, 3000); // Just 1-3 seconds for first message
   }
 
-  // Base delay yang lebih tinggi untuk anti-ban
-  const base = random(MESSAGE_DELAY_MIN_MS, MESSAGE_DELAY_MAX_MS);
+  // Base delay 30-60 detik setiap pesan (natural human pace)
+  const base = random(30000, 60000);
 
-  // Gradual backoff: grows slowly with index, capped
-  const gradual = Math.min(index * random(300, 800), 20000);
+  // Setiap kelipatan 10 pesan: delay 2-3 menit (istirahat panjang)
+  const longBreak = index > 0 && index % 10 === 0 ? random(120000, 180000) : 0;
 
-  // Occasional cooldown (every 5 messages)
-  const periodic = index > 0 && index % 5 === 0 ? random(25000, 50000) : 0;
-
-  // Extra break every 10 messages
-  const longBreak = index > 0 && index % 10 === 0 ? random(60000, 90000) : 0;
+  // Setiap kelipatan 5 pesan (tapi bukan kelipatan 10): delay 1.5 menit
+  const periodic = index > 0 && index % 5 === 0 && index % 10 !== 0 ? 90000 : 0;
 
   // Apply time multiplier
   const timeMultiplier = getTimeMultiplier();
 
-  const delay = Math.floor((base + gradual + periodic + longBreak) * timeMultiplier);
+  const delay = Math.floor((base + periodic + longBreak) * timeMultiplier);
 
-  // Cap at 3 minutes max to avoid looking stuck
-  return Math.min(delay, 180000);
+  // Cap at 5 minutes max to accommodate longer delays
+  return Math.min(delay, 300000);
 }
 
 function batchCooldown(batchIndex: number): number {

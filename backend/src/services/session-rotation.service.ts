@@ -14,8 +14,9 @@
 import prisma from '../lib/prisma';
 
 // Konfigurasi dari environment variables
-const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 30);
-const REST_HOURS = Number(process.env.SESSION_REST_HOURS || 1);
+const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 50);
+const SESSION_REST_TRIGGER = Number(process.env.SESSION_REST_TRIGGER || 30);
+const REST_MINUTES = Number(process.env.SESSION_REST_MINUTES || 30);
 
 // Daily limit dan broadcast hours
 const DAILY_MESSAGE_LIMIT = Number(process.env.DAILY_MESSAGE_LIMIT || 40);
@@ -136,9 +137,9 @@ export async function incrementJobCount(sessionId: string): Promise<boolean> {
         }
     });
 
-    // Cek apakah mencapai limit
+    // Cek apakah mencapai hard limit (50 jobs)
     if (session.jobCount >= JOB_LIMIT) {
-        const restUntil = new Date(Date.now() + REST_HOURS * 60 * 60 * 1000);
+        const restUntil = new Date(Date.now() + REST_MINUTES * 60 * 1000);
 
         await prisma.session.update({
             where: { sessionId },
@@ -148,7 +149,24 @@ export async function incrementJobCount(sessionId: string): Promise<boolean> {
             }
         });
 
-        console.log(`[SESSION-ROTATION] Session ${session.name} reached job limit (${JOB_LIMIT}), resting until ${restUntil.toISOString()}`);
+        console.log(`[SESSION-ROTATION] Session ${session.name} reached hard limit (${JOB_LIMIT}), resting ${REST_MINUTES}min until ${restUntil.toISOString()}`);
+        return true;
+    }
+
+    // Cek apakah mencapai rest trigger (setiap kelipatan SESSION_REST_TRIGGER)
+    // Contoh: trigger di job ke-30, session rest 30 menit, handoff ke session lain
+    if (session.jobCount % SESSION_REST_TRIGGER === 0 && session.jobCount < JOB_LIMIT) {
+        const restUntil = new Date(Date.now() + REST_MINUTES * 60 * 1000);
+
+        await prisma.session.update({
+            where: { sessionId },
+            data: {
+                jobLimitReached: true,
+                restingUntil: restUntil
+            }
+        });
+
+        console.log(`[SESSION-ROTATION] Session ${session.name} reached rest trigger (${session.jobCount}/${JOB_LIMIT}), resting ${REST_MINUTES}min, handoff to other sessions`);
         return true;
     }
 
@@ -680,7 +698,8 @@ export default {
     getFailoverSession,
     // Constants
     JOB_LIMIT,
-    REST_HOURS,
+    SESSION_REST_TRIGGER,
+    REST_MINUTES,
     DAILY_MESSAGE_LIMIT,
     BROADCAST_START_HOUR,
     BROADCAST_END_HOUR,
