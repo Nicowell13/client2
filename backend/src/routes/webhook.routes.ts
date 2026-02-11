@@ -46,20 +46,52 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
 
     // Handle message delivery status
     if (event === 'message.ack') {
-      // Update message status based on ack
       const ackStatus = payload.ack;
-      let status = 'sent';
+      let status: string | undefined;
+      let isError = false;
 
-      if (ackStatus === 2) status = 'delivered';
-      if (ackStatus === 3) status = 'read';
+      if (ackStatus === -1) {
+        status = 'failed';
+        isError = true;
+      } else if (ackStatus === 2) {
+        status = 'delivered';
+      } else if (ackStatus === 3) {
+        status = 'read';
+      }
 
-      await prisma.message.updateMany({
-        where: { waMessageId: payload.id },
-        data: {
-          status,
-          deliveredAt: ackStatus >= 2 ? new Date() : undefined,
-        },
-      });
+      if (status) {
+        // Find the message first to know which campaign to update
+        const msgRecord = await prisma.message.findFirst({
+          where: { waMessageId: payload.id },
+          select: { id: true, campaignId: true, status: true }
+        });
+
+        if (msgRecord) {
+          await prisma.message.update({
+            where: { id: msgRecord.id },
+            data: {
+              status,
+              deliveredAt: ackStatus >= 2 ? new Date() : undefined,
+              errorMsg: isError ? `WhatsApp Error (ack: -1)` : undefined
+            },
+          });
+
+          // Update campaign stats if it transitioned to failed from something else
+          if (isError && msgRecord.status !== 'failed') {
+            try {
+              await prisma.campaign.update({
+                where: { id: msgRecord.campaignId },
+                data: {
+                  failedCount: { increment: 1 },
+                  sentCount: { decrement: 1 }
+                }
+              });
+            } catch (statsError) {
+              console.warn('[Webhook] Failed to update campaign stats:', statsError);
+            }
+          }
+        }
+      }
     }
 
     res.json({ success: true });

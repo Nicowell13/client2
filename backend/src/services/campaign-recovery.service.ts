@@ -70,7 +70,10 @@ async function getActiveSessions() {
 }
 
 /**
- * Get campaigns that are stuck in "sending" status with inactive sessions
+ * Get campaigns that are stuck or need reassignment
+ * Criteria:
+ * 1. Status "sending" but session is inactive
+ * 2. OR has messages stuck in "waiting" for more than 10 minutes
  */
 async function getStuckCampaigns() {
     const campaigns = await prisma.campaign.findMany({
@@ -85,8 +88,26 @@ async function getStuckCampaigns() {
 
     const stuckCampaigns = [];
     for (const campaign of campaigns) {
+        // 1. Check session status
         const isActive = await isSessionActive(campaign.session.sessionId);
         if (!isActive) {
+            console.log(`[RECOVERY] Campaign "${campaign.name}" has inactive session ${campaign.session.sessionId}`);
+            stuckCampaigns.push(campaign);
+            continue;
+        }
+
+        // 2. Check for stuck messages (waiting for more than 10 minutes)
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const stuckMessages = await prisma.message.count({
+            where: {
+                campaignId: campaign.id,
+                status: 'waiting',
+                updatedAt: { lt: tenMinutesAgo }
+            }
+        });
+
+        if (stuckMessages > 0) {
+            console.log(`[RECOVERY] Campaign "${campaign.name}" has ${stuckMessages} stuck 'waiting' messages`);
             stuckCampaigns.push(campaign);
         }
     }
@@ -138,6 +159,7 @@ async function reassignCampaign(
         });
 
         // Combine: fresh messages first, then attempted messages
+        // FRESH = never attempted, ATTEMPTED = failed/waiting previously
         const pendingMessages = [...freshMessages, ...attemptedMessages];
 
         console.log(
@@ -145,7 +167,7 @@ async function reassignCampaign(
         );
 
         if (pendingMessages.length === 0) {
-            console.log(`[RECOVERY] No pending messages for campaign ${campaign.id}`);
+            console.log(`[RECOVERY] No pending/waiting messages for campaign ${campaign.id}`);
 
             // Check if campaign should be marked as complete
             const totalMessages = await prisma.message.count({
@@ -153,7 +175,7 @@ async function reassignCampaign(
             });
 
             const sentMessages = await prisma.message.count({
-                where: { campaignId: campaign.id, status: 'sent' },
+                where: { campaignId: campaign.id, status: { in: ['sent', 'delivered', 'read'] } },
             });
 
             if (totalMessages > 0 && sentMessages === totalMessages) {
@@ -161,19 +183,23 @@ async function reassignCampaign(
                     where: { id: campaign.id },
                     data: { status: 'sent' },
                 });
-                console.log(`[RECOVERY] Campaign ${campaign.id} marked as complete`);
+                console.log(`[RECOVERY] Campaign ${campaign.id} successfully recovered and marked as complete`);
             }
 
             return { success: true, messagesReassigned: 0 };
         }
 
         // Update campaign to use new session
-        await prisma.campaign.update({
-            where: { id: campaign.id },
-            data: {
-                sessionId: newSession.id,
-            },
-        });
+        // Only if currently assigned to an INACTIVE session
+        const currentlyActive = await isSessionActive(campaign.session.sessionId);
+        if (!currentlyActive) {
+            await prisma.campaign.update({
+                where: { id: campaign.id },
+                data: {
+                    sessionId: newSession.id,
+                },
+            });
+        }
 
         // Get campaign message variants
         const variants: string[] =
@@ -198,7 +224,6 @@ async function reassignCampaign(
         // Re-queue all pending messages with new session
         const campaignQueue = getCampaignQueue(newSession.sessionId);
         let messageIndex = 0;
-        const BATCH_SIZE = 500;
         const batchIndex = 0;
 
         for (const msg of pendingMessages) {
@@ -206,6 +231,12 @@ async function reassignCampaign(
 
             // ⭐ Use unique jobId to prevent duplicate jobs in queue
             const jobId = `${campaign.id}_${msg.contact.id}`;
+
+            // Reset status back to 'pending' for processing
+            await prisma.message.update({
+                where: { id: msg.id },
+                data: { status: 'pending', errorMsg: `Recovered via ${newSession.sessionId}` }
+            });
 
             await campaignQueue.add({
                 campaignId: campaign.id,
@@ -220,15 +251,15 @@ async function reassignCampaign(
             }, {
                 // Prevent duplicate jobs with same jobId
                 jobId: jobId,
-                removeOnComplete: 100, // Keep last 100 completed jobs
-                removeOnFail: 50,      // Keep last 50 failed jobs
+                removeOnComplete: 100,
+                removeOnFail: 50,
             });
 
             messageIndex++;
         }
 
         console.log(
-            `[RECOVERY] Successfully reassigned ${pendingMessages.length} messages from campaign "${campaign.name}" to session ${newSession.sessionId}`
+            `[RECOVERY] Successfully re-queued ${pendingMessages.length} messages from campaign "${campaign.name}" to session ${newSession.sessionId}`
         );
 
         return {
