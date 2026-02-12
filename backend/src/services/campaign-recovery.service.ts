@@ -96,18 +96,19 @@ async function getStuckCampaigns() {
             continue;
         }
 
-        // 2. Check for stuck messages (waiting for more than 10 minutes)
+        // 2. Check for stuck messages (pending or waiting for more than 10 minutes)
+        // This handles cases where messages were queued but lost (Redis restart) or never picked up
         const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
         const stuckMessages = await prisma.message.count({
             where: {
                 campaignId: campaign.id,
-                status: 'waiting',
+                status: { in: ['waiting', 'pending'] },
                 updatedAt: { lt: tenMinutesAgo }
             }
         });
 
         if (stuckMessages > 0) {
-            console.log(`[RECOVERY] Campaign "${campaign.name}" has ${stuckMessages} stuck 'waiting' messages`);
+            console.log(`[RECOVERY] Campaign "${campaign.name}" has ${stuckMessages} stuck messages (pending/waiting > 10m)`);
             stuckCampaigns.push(campaign);
         }
     }
