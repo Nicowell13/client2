@@ -603,15 +603,43 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     }
 
     // =====================================================
+    // DETECT MEDIA/CONTENT ERRORS (PERMANENT FAIL)
+    // =====================================================
+    const isMediaError =
+      errorMsg.includes('404') ||
+      errorMsg.includes('400') ||
+      errorMsg.includes('415') ||
+      errorMsg.toLowerCase().includes('err_bad_request') ||
+      errorMsg.toLowerCase().includes('failed to send image') ||
+      errorMsg.toLowerCase().includes('failed to send video');
+
+    if (isMediaError) {
+      console.error(`❌ Media/Content error (permanent fail):`, errorMsg);
+
+      await prisma.message.updateMany({
+        where: { campaignId, contactId, status: 'pending' },
+        data: {
+          status: 'failed',
+          errorMsg: `Media Error: ${errorMsg.substring(0, 150)}`,
+        },
+      });
+
+      await safeCampaignUpdate(campaignId, { failedCount: { increment: 1 } });
+      throw new Error(`Media Error: ${errorMsg}`); // Stop processing this job
+    }
+
+    // =====================================================
     // DETECT SESSION LOGOUT/ERROR
     // =====================================================
+    // Only treat as session error if it's NOT a media error
     const isSessionError =
-      errorMsg.toLowerCase().includes('session') ||
-      errorMsg.toLowerCase().includes('logout') ||
-      errorMsg.toLowerCase().includes('not active') ||
-      errorMsg.toLowerCase().includes('unavailable') ||
-      errorMsg.toLowerCase().includes('authenticated') ||
-      errorMsg.toLowerCase().includes('connection');
+      (errorMsg.toLowerCase().includes('session') ||
+        errorMsg.toLowerCase().includes('logout') ||
+        errorMsg.toLowerCase().includes('not active') ||
+        errorMsg.toLowerCase().includes('unavailable') ||
+        errorMsg.toLowerCase().includes('authenticated') ||
+        errorMsg.toLowerCase().includes('connection')) &&
+      !isMediaError;
 
     if (isSessionError) {
       console.error(`❌ Session error detected for ${sessionName}:`, errorMsg);
