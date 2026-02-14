@@ -338,7 +338,7 @@ export default function ContactsPage() {
         <div className="bg-white rounded-lg shadow">
           <div className="p-6 border-b">
             <h2 className="text-xl font-semibold">
-              All Contacts ({pagination?.total ?? contacts.length}/40)
+              All Contacts ({pagination?.total ?? contacts.length}/50)
             </h2>
           </div>
           {loading ? (

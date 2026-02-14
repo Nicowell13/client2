@@ -132,10 +132,10 @@ services:
       
       # Anti-Ban: Rate limiting
       - DAILY_MESSAGE_LIMIT=60
-      - SESSION_JOB_LIMIT=40
-      - SESSION_CONTACT_LIMIT=40
-      - SESSION_REST_TRIGGER=30
-      - SESSION_REST_MINUTES=30
+      - SESSION_JOB_LIMIT=50
+      - SESSION_CONTACT_LIMIT=50
+      - SESSION_REST_TRIGGER=25
+      - SESSION_REST_MINUTES=45
       
       # Anti-Ban: Message delays
       - MESSAGE_DELAY_MIN_MS=30000

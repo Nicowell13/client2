@@ -14,10 +14,10 @@
 import prisma from '../lib/prisma';
 
 // Konfigurasi dari environment variables
-export const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 40);
-const SESSION_REST_TRIGGER = Number(process.env.SESSION_REST_TRIGGER || 30);
-const REST_MINUTES = Number(process.env.SESSION_REST_MINUTES || 30);
-export const SESSION_CONTACT_LIMIT = Number(process.env.SESSION_CONTACT_LIMIT || 40);
+export const JOB_LIMIT = Number(process.env.SESSION_JOB_LIMIT || 50);
+const SESSION_REST_TRIGGER = Number(process.env.SESSION_REST_TRIGGER || 25);
+const REST_MINUTES = Number(process.env.SESSION_REST_MINUTES || 45);
+export const SESSION_CONTACT_LIMIT = Number(process.env.SESSION_CONTACT_LIMIT || 50);
 
 // Daily limit dan broadcast hours
 const DAILY_MESSAGE_LIMIT = Number(process.env.DAILY_MESSAGE_LIMIT || 40);
