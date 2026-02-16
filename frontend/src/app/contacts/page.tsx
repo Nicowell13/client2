@@ -36,7 +36,7 @@ export default function ContactsPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newContact, setNewContact] = useState({ name: '', phoneNumber: '', email: '' });
   const [page, setPage] = useState(1);
-  const [limit] = useState(50);
+  const [limit] = useState(500); // Show all contacts (up to global limit)
   const [pagination, setPagination] = useState<ContactsPagination | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -191,7 +191,7 @@ export default function ContactsPage() {
   const isGlobalLimitReached = totalContacts >= GLOBAL_CONTACT_LIMIT;
 
   return (
-    <DashboardLayout title="Contacts" description="Manage your global contact list (Max 500)">
+    <DashboardLayout title="Contacts" description="Manage your global contact list">
       <div>
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-2">
@@ -199,8 +199,8 @@ export default function ContactsPage() {
               onClick={() => setShowAddForm(!showAddForm)}
               disabled={isGlobalLimitReached}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${isGlobalLimitReached
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700'
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-700'
                 }`}
             >
               <Plus className="w-5 h-5" />
@@ -230,15 +230,14 @@ export default function ContactsPage() {
           <div className="mb-6 bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center gap-2">
             <span>⚠️</span>
             <span>
-              <strong>Global Limit Reached:</strong> You have reached the maximum of {GLOBAL_CONTACT_LIMIT} contacts.
-              Please delete some contacts before adding new ones.
+              <strong>Limit Reached:</strong> You have reached the maximum of {GLOBAL_CONTACT_LIMIT} contacts.
             </span>
           </div>
         )}
 
         {/* Upload CSV */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Upload CSV (Global)</h2>
+          <h2 className="text-xl font-semibold mb-4">Upload CSV</h2>
           <div
             {...getRootProps()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragActive ? 'border-green-600 bg-green-50' : 'border-gray-300 hover:border-green-600'
@@ -249,15 +248,14 @@ export default function ContactsPage() {
             {uploading ? (
               <p className="text-gray-600">Uploading...</p>
             ) : isGlobalLimitReached ? (
-              <p className="text-red-500 font-medium">Global limit reached. Cannot upload more contacts.</p>
+              <p className="text-red-500 font-medium">Limit reached. Cannot upload more contacts.</p>
             ) : isDragActive ? (
               <p className="text-gray-600">Drop the CSV file(s) here...</p>
             ) : (
               <div>
                 <p className="text-gray-600 mb-2">Drag & drop CSV file(s) here, or click to select</p>
                 <p className="text-sm text-gray-500">
-                  Format: name, phoneNumber, email (optional)<br />
-                  <strong>Max 500 contacts global limit</strong>
+                  Format: name, phoneNumber, email (optional)
                 </p>
               </div>
             )}
@@ -322,11 +320,8 @@ export default function ContactsPage() {
         <div className="bg-white rounded-lg shadow">
           <div className="p-6 border-b flex justify-between items-center">
             <h2 className="text-xl font-semibold">
-              All Contacts
+              All Contacts ({totalContacts})
             </h2>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${isGlobalLimitReached ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-              {totalContacts} / {GLOBAL_CONTACT_LIMIT}
-            </span>
           </div>
           {loading ? (
             <div className="text-center py-12">
