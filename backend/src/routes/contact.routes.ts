@@ -242,7 +242,7 @@ router.get('/', async (req: Request, res: Response) => {
     const skip = (Number(page) - 1) * Number(limit);
 
     let where: any = {};
-    if (sessionId) {
+    if (sessionId && sessionId !== 'undefined' && sessionId !== 'null') {
       where.sessionId = String(sessionId);
     }
     if (search) {

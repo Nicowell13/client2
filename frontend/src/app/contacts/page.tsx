@@ -15,8 +15,7 @@ interface Contact {
   phoneNumber: string;
   email: string | null;
   createdAt: string;
-  sessionId: string | null;
-  session?: { id: string; name: string };
+  // sessionId is optional/removed from view in global mode
 }
 
 interface ContactsPagination {
@@ -77,7 +76,7 @@ export default function ContactsPage() {
   const fetchContacts = async (targetPage: number) => {
     setLoading(true);
     try {
-      // No sessionId required for global contacts
+      // FORCE GLOBAL MODE: strictly omit sessionId
       const resp = await contactAPI.getAll({ page: targetPage, limit });
       const payload = resp.data;
       const data = Array.isArray(payload) ? payload : payload?.data || [];
@@ -100,7 +99,7 @@ export default function ContactsPage() {
 
     setUploading(true);
     try {
-      // Upload without sessionId (global)
+      // FORCE GLOBAL MODE: strictly omit sessionId
       const { data } = await contactAPI.uploadCSV(files);
 
       if (data?.success) {
