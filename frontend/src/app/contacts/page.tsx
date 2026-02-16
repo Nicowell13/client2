@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import Link from 'next/link';
 import { ArrowLeft, Upload, Plus, Trash2 } from 'lucide-react';
-import { contactAPI, sessionAPI } from '@/lib/api-client';
+import { contactAPI } from '@/lib/api-client';
 import toast from 'react-hot-toast';
 import { useDropzone } from 'react-dropzone';
 
@@ -15,14 +15,8 @@ interface Contact {
   phoneNumber: string;
   email: string | null;
   createdAt: string;
-  sessionId: string;
+  sessionId: string | null;
   session?: { id: string; name: string };
-}
-
-interface Session {
-  id: string;
-  name: string;
-  status: string;
 }
 
 interface ContactsPagination {
@@ -32,11 +26,11 @@ interface ContactsPagination {
   totalPages: number;
 }
 
+const GLOBAL_CONTACT_LIMIT = 500;
+
 export default function ContactsPage() {
   const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [selectedSession, setSelectedSession] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -52,38 +46,10 @@ export default function ContactsPage() {
       router.push('/login');
       return;
     }
-    fetchSessions();
+    fetchContacts(page);
   }, []);
 
   useEffect(() => {
-    if (sessions.length > 0 && !selectedSession) {
-      setSelectedSession(sessions[0].id);
-    }
-  }, [sessions]);
-
-  useEffect(() => {
-    setPage(1);
-    setSelectedIds(new Set());
-  }, [selectedSession]);
-
-  useEffect(() => {
-    if (selectedSession) fetchContacts(page);
-    setSelectedIds(new Set());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSession, page]);
-
-  const fetchSessions = async () => {
-    try {
-      const res = await sessionAPI.getAll();
-      setSessions(res.data?.data || []);
-    } catch {
-      toast.error("Failed to load sessions");
-    }
-  };
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
     fetchContacts(page);
     setSelectedIds(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,9 +75,10 @@ export default function ContactsPage() {
   };
 
   const fetchContacts = async (targetPage: number) => {
-    if (!selectedSession) return;
+    setLoading(true);
     try {
-      const resp = await contactAPI.getAll({ page: targetPage, limit, sessionId: selectedSession });
+      // No sessionId required for global contacts
+      const resp = await contactAPI.getAll({ page: targetPage, limit });
       const payload = resp.data;
       const data = Array.isArray(payload) ? payload : payload?.data || [];
       setContacts(data);
@@ -129,24 +96,31 @@ export default function ContactsPage() {
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const files = acceptedFiles || [];
-    if (files.length === 0 || !selectedSession) return;
+    if (files.length === 0) return;
 
     setUploading(true);
     try {
-      const { data } = await contactAPI.uploadCSV(files, selectedSession);
-      const imported = Number(data?.data?.imported);
-      if (!Number.isNaN(imported) && imported === 0) {
-        toast.error(data?.message || '0 contacts imported. Check CSV header/format.');
+      // Upload without sessionId (global)
+      const { data } = await contactAPI.uploadCSV(files);
+
+      if (data?.success) {
+        // Show detailed message about imported/discarded contacts
+        if (data.message) {
+          toast.success(data.message);
+        } else {
+          toast.success('Contacts uploaded successfully');
+        }
       } else {
-        toast.success(data?.message || 'Contacts uploaded');
+        toast.error(data?.message || 'Upload failed');
       }
+
       fetchContacts(page);
-    } catch (error) {
-      toast.error('Failed to upload contacts');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to upload contacts');
     } finally {
       setUploading(false);
     }
-  }, [selectedSession, page]);
+  }, [page]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -157,15 +131,15 @@ export default function ContactsPage() {
 
   const addContact = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSession) return toast.error('Please select a session');
     try {
-      await contactAPI.create({ ...newContact, sessionId: selectedSession });
+      // Create without sessionId (global)
+      await contactAPI.create({ ...newContact });
       toast.success('Contact added successfully');
       setNewContact({ name: '', phoneNumber: '', email: '' });
       setShowAddForm(false);
       fetchContacts(page);
-    } catch (error) {
-      toast.error('Failed to add contact');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Failed to add contact');
     }
   };
 
@@ -190,8 +164,9 @@ export default function ContactsPage() {
       const resp = await contactAPI.bulkDelete({ ids });
       toast.success(resp.data?.message || 'Contacts deleted');
       setSelectedIds(new Set());
-      setPage(1);
-      fetchContacts(1);
+      // Stay on page 1 after bulk delete to avoid empty pages
+      if (page > 1) setPage(1);
+      else fetchContacts(1);
     } catch (error: any) {
       toast.error(error?.response?.data?.message || 'Failed to delete contacts');
     }
@@ -212,14 +187,21 @@ export default function ContactsPage() {
     }
   };
 
+  const totalContacts = pagination?.total ?? 0;
+  const isGlobalLimitReached = totalContacts >= GLOBAL_CONTACT_LIMIT;
+
   return (
-    <DashboardLayout title="Contacts" description="Manage your contact list">
+    <DashboardLayout title="Contacts" description="Manage your global contact list (Max 500)">
       <div>
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowAddForm(!showAddForm)}
-              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+              disabled={isGlobalLimitReached}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${isGlobalLimitReached
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 hover:bg-green-700'
+                }`}
             >
               <Plus className="w-5 h-5" />
               Add Contact
@@ -243,38 +225,40 @@ export default function ContactsPage() {
           </div>
         </div>
 
-        {/* Session Selector */}
-        <div className="mb-6">
-          <label className="block mb-1 font-medium">Select Session</label>
-          <select
-            className="w-full border px-3 py-2 rounded-lg"
-            value={selectedSession}
-            onChange={e => setSelectedSession(e.target.value)}
-          >
-            {sessions.map(s => (
-              <option key={s.id} value={s.id}>{s.name} ({s.status})</option>
-            ))}
-          </select>
-        </div>
+        {/* Global Limit Warning */}
+        {isGlobalLimitReached && (
+          <div className="mb-6 bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center gap-2">
+            <span>⚠️</span>
+            <span>
+              <strong>Global Limit Reached:</strong> You have reached the maximum of {GLOBAL_CONTACT_LIMIT} contacts.
+              Please delete some contacts before adding new ones.
+            </span>
+          </div>
+        )}
 
         {/* Upload CSV */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Upload CSV</h2>
+          <h2 className="text-xl font-semibold mb-4">Upload CSV (Global)</h2>
           <div
             {...getRootProps()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragActive ? 'border-green-600 bg-green-50' : 'border-gray-300 hover:border-green-600'
-              }`}
+              } ${isGlobalLimitReached && !uploading ? 'opacity-50 pointer-events-none' : ''}`}
           >
-            <input {...getInputProps()} />
+            <input {...getInputProps()} disabled={isGlobalLimitReached && !uploading} />
             <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
             {uploading ? (
               <p className="text-gray-600">Uploading...</p>
+            ) : isGlobalLimitReached ? (
+              <p className="text-red-500 font-medium">Global limit reached. Cannot upload more contacts.</p>
             ) : isDragActive ? (
               <p className="text-gray-600">Drop the CSV file(s) here...</p>
             ) : (
               <div>
                 <p className="text-gray-600 mb-2">Drag & drop CSV file(s) here, or click to select</p>
-                <p className="text-sm text-gray-500">Format: name, phoneNumber, email (optional)</p>
+                <p className="text-sm text-gray-500">
+                  Format: name, phoneNumber, email (optional)<br />
+                  <strong>Max 500 contacts global limit</strong>
+                </p>
               </div>
             )}
           </div>
@@ -336,10 +320,13 @@ export default function ContactsPage() {
 
         {/* Contacts List */}
         <div className="bg-white rounded-lg shadow">
-          <div className="p-6 border-b">
+          <div className="p-6 border-b flex justify-between items-center">
             <h2 className="text-xl font-semibold">
-              All Contacts ({pagination?.total ?? contacts.length}/50)
+              All Contacts
             </h2>
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${isGlobalLimitReached ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+              {totalContacts} / {GLOBAL_CONTACT_LIMIT}
+            </span>
           </div>
           {loading ? (
             <div className="text-center py-12">

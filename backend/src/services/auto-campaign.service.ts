@@ -149,7 +149,6 @@ async function sendCampaignRoundRobin(
         data: {
           status: 'sending',
           totalContacts: contacts.length,
-          sessionId: 'MULTI-SESSION', // Marker for multi-session campaign
         },
       });
     } catch (dbError: any) {
