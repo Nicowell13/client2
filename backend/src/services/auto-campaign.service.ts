@@ -117,7 +117,7 @@ async function sendCampaignRoundRobin(
 ): Promise<{ success: boolean; error?: string; sessionsUsed: number }> {
   try {
     if (!allSessions || allSessions.length === 0) {
-      return { success: false, error: 'No active sessions available for round-robin' };
+      return { success: false, error: 'No active sessions available for round-robin', sessionsUsed: 0 };
     }
 
     const variants: string[] =
