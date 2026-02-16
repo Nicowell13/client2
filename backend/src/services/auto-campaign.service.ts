@@ -108,93 +108,55 @@ async function findNextActiveSession(
 /**
  * Send campaign using specified session with failover support
  */
-async function sendCampaignWithFailover(
+/**
+ * Send campaign distributing messages across ALL active sessions (Round-Robin)
+ */
+async function sendCampaignRoundRobin(
   campaign: any,
-  preferredSession: any,
   allSessions: any[]
-): Promise<{ success: boolean; sessionUsed: any; error?: string }> {
-  let currentSession = preferredSession;
-
-  // Verify session is active before starting
-  if (!(await isSessionActive(currentSession.sessionId))) {
-    console.warn(
-      `[AUTO-CAMPAIGN] Preferred session ${currentSession.sessionId} not active, finding alternative`
-    );
-    const nextSession = await findNextActiveSession(currentSession.sessionId, allSessions);
-    if (!nextSession) {
-      return {
-        success: false,
-        sessionUsed: currentSession,
-        error: 'No active sessions available',
-      };
-    }
-    currentSession = nextSession;
-    console.log(
-      `[AUTO-CAMPAIGN] Switched to session ${currentSession.sessionId} due to inactive preferred session`
-    );
-  }
-
+): Promise<{ success: boolean; error?: string; sessionsUsed: number }> {
   try {
+    if (!allSessions || allSessions.length === 0) {
+      return { success: false, error: 'No active sessions available for round-robin' };
+    }
+
     const variants: string[] =
       Array.isArray(campaign.variants) && campaign.variants.length > 0
         ? campaign.variants.map((m: any) => String(m ?? '').trim()).filter((m: string) => m.length > 0)
         : [String(campaign.message ?? '').trim()].filter((m: string) => m.length > 0);
 
     if (variants.length === 0) {
-      return {
-        success: false,
-        sessionUsed: currentSession,
-        error: 'Campaign message is empty',
-      };
+      return { success: false, error: 'Campaign message is empty', sessionsUsed: 0 };
     }
 
-    // Get contacts - try current session first, then fallback to any contacts
-    let contacts = await prisma.contact.findMany({
-      where: { sessionId: currentSession.id },
+    // Get ALL contacts (Global pool)
+    // We strictly use the global pool now, ignoring session association
+    const contacts = await prisma.contact.findMany({
+      take: 500, // Hard limit 500 per campaign execution as per requirement
+      orderBy: { createdAt: 'desc' }
     });
 
-    // If no contacts in current session, try to get contacts from campaign's original session
-    if (contacts.length === 0 && campaign.sessionId) {
-      contacts = await prisma.contact.findMany({
-        where: { sessionId: campaign.sessionId },
-      });
-    }
-
-    // Last resort: get any contacts
     if (contacts.length === 0) {
-      contacts = await prisma.contact.findMany({
-        take: 1000, // Limit to avoid too many contacts
-      });
+      return { success: false, error: 'No contacts found', sessionsUsed: 0 };
     }
 
-    if (contacts.length === 0) {
-      return {
-        success: false,
-        sessionUsed: currentSession,
-        error: 'No contacts found',
-      };
-    }
+    console.log(`[AUTO-CAMPAIGN] Distributing ${contacts.length} contacts across ${allSessions.length} sessions`);
 
-    // Update campaign to use current session
+    // Update campaign status
     try {
       await prisma.campaign.update({
         where: { id: campaign.id },
         data: {
-          sessionId: currentSession.id,
           status: 'sending',
           totalContacts: contacts.length,
+          sessionId: 'MULTI-SESSION', // Marker for multi-session campaign
         },
       });
     } catch (dbError: any) {
-      if (dbError.code === 'P2025' || dbError.message?.includes('Record to update not found')) {
-        console.error(`[AUTO-CAMPAIGN] Campaign ${campaign.id} not found during update (likely deleted). Aborting.`);
-        return {
-          success: false,
-          sessionUsed: currentSession,
-          error: 'Campaign not found (deleted)',
-        };
+      if (dbError.code === 'P2025') {
+        return { success: false, error: 'Campaign not found (deleted)', sessionsUsed: 0 };
       }
-      throw dbError; // Re-throw other errors to be handled by the outer catch
+      throw dbError;
     }
 
     // Create message placeholder rows
@@ -206,107 +168,66 @@ async function sendCampaignWithFailover(
       })),
     });
 
-    // Queue messages
-    const BATCH_SIZE = 500;
-    const batches = [];
-    for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
-      batches.push(contacts.slice(i, i + BATCH_SIZE));
-    }
-
     const btns = campaign.buttons.map((b: any) => ({
       label: b.label,
       url: b.url,
     }));
 
-    const campaignQueue = getCampaignQueue(currentSession.sessionId);
+    // Round-Robin Distribution Loop
+    for (let i = 0; i < contacts.length; i++) {
+      const c = contacts[i];
 
-    for (let b = 0; b < batches.length; b++) {
-      const batch = batches[b];
-      for (let i = 0; i < batch.length; i++) {
-        const c = batch[i];
-        const globalIndex = b * BATCH_SIZE + i;
-        const selectedMessage = variants[globalIndex % variants.length];
+      // Pick session based on index (Round Robin)
+      const sessionIndex = i % allSessions.length;
+      const currentSession = allSessions[sessionIndex];
 
-        try {
-          await campaignQueue.add({
-            campaignId: campaign.id,
-            contactId: c.id,
-            phoneNumber: c.phoneNumber,
-            message: selectedMessage,
-            imageUrl: campaign.imageUrl,
-            buttons: btns,
-            sessionName: currentSession.sessionId,
-            messageIndex: i,
-            batchIndex: b,
-          }, {
-            // ⭐ Unique jobId prevents duplicate jobs
-            jobId: `${campaign.id}_${c.id}`,
-            removeOnComplete: 100,
-            removeOnFail: 50,
-          });
-        } catch (queueError: any) {
-          console.error(`[AUTO-CAMPAIGN] Failed to add job to queue (Redis error?):`, queueError.message);
+      const selectedMessage = variants[i % variants.length];
+      const campaignQueue = getCampaignQueue(currentSession.sessionId);
 
-          if (queueError.message?.includes('OOM') || queueError.message?.includes('memory')) {
-            throw new Error('Redis memory full - cannot queue more messages. Please upgrade server or clear Redis.');
-          }
-          throw queueError;
-        }
+      try {
+        await campaignQueue.add({
+          campaignId: campaign.id,
+          contactId: c.id,
+          phoneNumber: c.phoneNumber,
+          message: selectedMessage,
+          imageUrl: campaign.imageUrl,
+          buttons: btns,
+          sessionName: currentSession.sessionId,
+          messageIndex: i,
+          batchIndex: 0,
+        }, {
+          jobId: `${campaign.id}_${c.id}`, // Unique job ID
+          removeOnComplete: 100,
+          removeOnFail: 50,
+        });
+      } catch (queueError: any) {
+        console.error(`[AUTO-CAMPAIGN] Failed to add job to queue for session ${currentSession.sessionId}:`, queueError.message);
       }
     }
 
     console.log(
-      `[AUTO-CAMPAIGN] Campaign "${campaign.name}" queued with session ${currentSession.sessionId}`
+      `[AUTO-CAMPAIGN] Campaign "${campaign.name}" distributed across ${allSessions.length} sessions`
     );
 
     return {
       success: true,
-      sessionUsed: currentSession,
+      sessionsUsed: allSessions.length,
     };
   } catch (error: any) {
     console.error(`[AUTO-CAMPAIGN] Error sending campaign ${campaign.id}:`, error);
 
-    // 🛑 ABORT FAILOVER IF CAMPAIGN IS MISSING
-    if (error.code === 'P2025' || error.message?.includes('Record to update not found') || error.message?.includes('Campaign not found')) {
-      return {
-        success: false,
-        sessionUsed: currentSession,
-        error: 'Campaign not found (deleted)',
-      };
-    }
-
-    // Try failover to next session
-    const nextSession = await findNextActiveSession(currentSession.sessionId, allSessions);
-    if (nextSession && nextSession.sessionId !== currentSession.sessionId) {
-      console.log(
-        `[AUTO-CAMPAIGN] Attempting failover from ${currentSession.sessionId} to ${nextSession.sessionId}`
-      );
-      return await sendCampaignWithFailover(campaign, nextSession, allSessions);
-    }
-
-    // ⭐ SAFE UPDATE: Check if campaign still exists before updating
+    // Update to failed if possible
     try {
-      const campaignExists = await prisma.campaign.findUnique({
+      await prisma.campaign.update({
         where: { id: campaign.id },
-        select: { id: true }
+        data: { status: 'failed' },
       });
-
-      if (campaignExists) {
-        await prisma.campaign.update({
-          where: { id: campaign.id },
-          data: { status: 'failed' },
-        });
-      } else {
-        console.warn(`[AUTO-CAMPAIGN] Campaign ${campaign.id} no longer exists, skipping status update`);
-      }
-    } catch (updateError: any) {
-      console.warn(`[AUTO-CAMPAIGN] Failed to update campaign status:`, updateError.message);
-    }
+    } catch (e) { }
 
     return {
       success: false,
-      sessionUsed: currentSession,
       error: error.message || 'Failed to send campaign',
+      sessionsUsed: 0
     };
   }
 }
@@ -332,8 +253,8 @@ export async function executeAutoCampaigns(config: AutoCampaignConfig = {}) {
 
   console.log(`[AUTO-CAMPAIGN] Found ${activeSessions.length} active sessions`);
 
-  // Get draft campaigns (limit to number of sessions)
-  const campaigns = await getDraftCampaigns(activeSessions.length);
+  // Get draft campaigns (Process 1 by 1 for simplicity of distribution)
+  const campaigns = await getDraftCampaigns(1); // Process 1 at a time
   if (campaigns.length === 0) {
     console.log('[AUTO-CAMPAIGN] No draft campaigns found');
     return {
@@ -346,30 +267,22 @@ export async function executeAutoCampaigns(config: AutoCampaignConfig = {}) {
   console.log(`[AUTO-CAMPAIGN] Found ${campaigns.length} draft campaigns`);
 
   const results = [];
-  let sessionIndex = 0;
 
-  // Execute campaigns sequentially with delay
+  // Execute campaigns
   for (let i = 0; i < campaigns.length; i++) {
     const campaign = campaigns[i];
-    const session = activeSessions[sessionIndex % activeSessions.length];
 
     console.log(
-      `[AUTO-CAMPAIGN] Processing campaign "${campaign.name}" with session ${session.sessionId}`
+      `[AUTO-CAMPAIGN] Processing campaign "${campaign.name}"`
     );
 
-    const result = await sendCampaignWithFailover(campaign, session, activeSessions);
+    const result = await sendCampaignRoundRobin(campaign, activeSessions);
     results.push({
       campaignId: campaign.id,
       campaignName: campaign.name,
-      sessionUsed: result.sessionUsed.sessionId,
       success: result.success,
       error: result.error,
     });
-
-    // Move to next session for next campaign
-    if (result.success) {
-      sessionIndex++;
-    }
 
     // Delay before next campaign (except for last one)
     if (i < campaigns.length - 1) {

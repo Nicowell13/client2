@@ -127,13 +127,12 @@ function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumb
   });
 }
 
+const GLOBAL_CONTACT_LIMIT = 500;
+
 // Upload CSV contacts (supports single or multiple files)
 router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 20 }]), async (req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
-    if (!sessionId) {
-      return res.status(400).json({ success: false, message: 'sessionId is required' });
-    }
+    // SessionID is no longer required for global contacts
     const uploaded = (req as any).files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const combined: Express.Multer.File[] = [
       ...(uploaded?.files || []),
@@ -155,47 +154,77 @@ router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'fi
       });
     }
 
-    const perFile: Array<{ filename: string; imported: number }> = [];
+    const perFile: Array<{ filename: string; imported: number; discarded: number }> = [];
     let totalImported = 0;
+    let totalDiscarded = 0;
 
-    // Get current contact count for this session
-    const currentCount = await prisma.contact.count({ where: { sessionId } });
+    // Get current contact count (GLOBAL)
+    const currentCount = await prisma.contact.count();
+    let remainingQuota = GLOBAL_CONTACT_LIMIT - currentCount;
+
+    if (remainingQuota <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Global limit reached (${GLOBAL_CONTACT_LIMIT} contacts). Please delete some contacts first.`,
+      });
+    }
 
     for (const f of files) {
+      // Parse ALL contacts from file first
       const parsed = await parseCsvBuffer(f.buffer);
 
       if (parsed.length === 0) {
-        perFile.push({ filename: f.originalname, imported: 0 });
+        perFile.push({ filename: f.originalname, imported: 0, discarded: 0 });
         continue;
       }
 
-      // Check if adding these contacts exceeds the limit
-      if (currentCount + totalImported + parsed.length > SESSION_CONTACT_LIMIT) {
-        return res.status(400).json({
-          success: false,
-          message: `Limit exceeded. Maksimal ${SESSION_CONTACT_LIMIT} kontak per season. Sisa kuota: ${SESSION_CONTACT_LIMIT - (currentCount + totalImported)}`,
-        });
-      }
+      // Calculate how many we can import from this file
+      const canImport = Math.min(parsed.length, remainingQuota);
+      const toImport = parsed.slice(0, canImport);
+      const discardedCount = parsed.length - canImport;
 
+      // Import the allowed batch
       const result = await Promise.all(
-        parsed.map((contact) =>
+        toImport.map((contact) =>
           prisma.contact.upsert({
-            where: { phoneNumber_sessionId: { phoneNumber: contact.phoneNumber, sessionId } },
-            update: { ...contact, sessionId },
-            create: { ...contact, sessionId },
+            where: { phoneNumber: contact.phoneNumber }, // Global unique check
+            update: { ...contact, sessionId: null }, // Ensure sessionId is null for global
+            create: { ...contact, sessionId: null },
           })
         )
       );
-      perFile.push({ filename: f.originalname, imported: result.length });
-      totalImported += result.length;
+
+      // Verify how many were actually created/updated (upsert returns record)
+      const importedCount = result.length;
+
+      perFile.push({
+        filename: f.originalname,
+        imported: importedCount,
+        discarded: discardedCount
+      });
+
+      totalImported += importedCount;
+      totalDiscarded += discardedCount;
+      remainingQuota -= importedCount;
+
+      // If we've hit the limit, stop processing further files
+      if (remainingQuota <= 0) break;
+    }
+
+    let message = `${totalImported} contacts imported successfully.`;
+    if (totalDiscarded > 0) {
+      message += ` ${totalDiscarded} contacts were discarded because the global limit of ${GLOBAL_CONTACT_LIMIT} was reached.`;
     }
 
     return res.json({
       success: true,
-      message: `${totalImported} contacts imported successfully from ${files.length} file(s)`,
+      message,
       data: {
         imported: totalImported,
+        discarded: totalDiscarded,
         files: perFile,
+        globalCount: currentCount + totalImported,
+        limit: GLOBAL_CONTACT_LIMIT
       },
     });
   } catch (error: any) {
@@ -295,21 +324,22 @@ router.post('/bulk-delete', async (req: Request, res: Response) => {
 // Create contact manually
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, phoneNumber, email, sessionId } = req.body;
+    const { name, phoneNumber, email } = req.body;
+    // SessionID is no longer required/used
 
-    if (!name || !phoneNumber || !sessionId) {
+    if (!name || !phoneNumber) {
       return res.status(400).json({
         success: false,
-        message: 'Name, phone number, and sessionId are required',
+        message: 'Name and phone number are required',
       });
     }
 
-    // Check contact limit
-    const currentCount = await prisma.contact.count({ where: { sessionId } });
-    if (currentCount >= SESSION_CONTACT_LIMIT) {
+    // Check GLOBAL contact limit
+    const currentCount = await prisma.contact.count();
+    if (currentCount >= GLOBAL_CONTACT_LIMIT) {
       return res.status(400).json({
         success: false,
-        message: `Limit exceeded. Maksimal ${SESSION_CONTACT_LIMIT} kontak per season.`,
+        message: `Global limit exceeded. Maksimal ${GLOBAL_CONTACT_LIMIT} kontak (Global).`,
       });
     }
 
@@ -318,7 +348,7 @@ router.post('/', async (req: Request, res: Response) => {
         name,
         phoneNumber: phoneNumber.replace(/\D/g, ''),
         email,
-        sessionId,
+        sessionId: null, // Global contact
       },
     });
 

@@ -163,7 +163,9 @@ export async function incrementJobCount(sessionId: string): Promise<boolean> {
 
     // Cek apakah mencapai hard limit (50 jobs)
     if (session.jobCount >= JOB_LIMIT) {
-        const restUntil = new Date(Date.now() + REST_MINUTES * 60 * 1000);
+        // Selesai 1 season -> istirahat panjang (misal 60 menit atau menunggu reset manual/auto)
+        // Default behavior: stop working until reset
+        const restUntil = new Date(Date.now() + 60 * 60 * 1000); // Default 1 jam jika limit reached
 
         await prisma.session.update({
             where: { sessionId },
@@ -173,24 +175,36 @@ export async function incrementJobCount(sessionId: string): Promise<boolean> {
             }
         });
 
-        console.log(`[SESSION-ROTATION] Session ${session.name} reached hard limit (${JOB_LIMIT}), resting ${REST_MINUTES}min until ${restUntil.toISOString()}`);
+        console.log(`[SESSION-ROTATION] Session ${session.name} reached HARD LIMIT (${JOB_LIMIT}), resting until ${restUntil.toISOString()}`);
         return true;
     }
 
-    // Cek apakah mencapai rest trigger (setiap kelipatan SESSION_REST_TRIGGER)
-    // Contoh: trigger di job ke-30, session rest 30 menit, handoff ke session lain
-    if (session.jobCount % SESSION_REST_TRIGGER === 0 && session.jobCount < JOB_LIMIT) {
-        const restUntil = new Date(Date.now() + REST_MINUTES * 60 * 1000);
+    // MULTI-STAGE RESTING LOGIC
+    // 10 pesan -> rest 15 menit
+    // 25 pesan -> rest 45 menit
+    // 40 pesan -> rest 15 menit
+    let restDurationMinutes = 0;
+
+    if (session.jobCount === 10) {
+        restDurationMinutes = 15;
+    } else if (session.jobCount === 25) {
+        restDurationMinutes = 45;
+    } else if (session.jobCount === 40) {
+        restDurationMinutes = 15;
+    }
+
+    if (restDurationMinutes > 0) {
+        const restUntil = new Date(Date.now() + restDurationMinutes * 60 * 1000);
 
         await prisma.session.update({
             where: { sessionId },
             data: {
-                jobLimitReached: true,
+                jobLimitReached: true, // Mark as limited so it's excluded from selection
                 restingUntil: restUntil
             }
         });
 
-        console.log(`[SESSION-ROTATION] Session ${session.name} reached rest trigger (${session.jobCount}/${JOB_LIMIT}), resting ${REST_MINUTES}min, handoff to other sessions`);
+        console.log(`[SESSION-ROTATION] Session ${session.name} reached REST TRIGGER (${session.jobCount} msgs), resting ${restDurationMinutes}min until ${restUntil.toISOString()}`);
         return true;
     }
 

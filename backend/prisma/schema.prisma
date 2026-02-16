@@ -76,8 +76,8 @@ model Contact {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  sessionId   String
-  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     Session?   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   messages    Message[] @relation("ContactMessages")
 
@@ -86,7 +86,7 @@ model Contact {
   messageCount    Int       @default(0)   // Total pesan yang pernah dikirim ke kontak ini
   cooldownUntil   DateTime?               // Jangan kirim sampai waktu ini
 
-  @@unique([phoneNumber, sessionId])
+  @@unique([phoneNumber])
   @@map("contacts")
 }
 

@@ -78,9 +78,13 @@ services:
       
       # Session configuration
       - WHATSAPP_RESTART_ALL_SESSIONS=True
-      - WHATSAPP_START_SESSIONS=default
+      - WHATSAPP_START_SESSIONS=session_1,session_2,session_3,session_4,session_5,session_6,session_7,session_8,session_9,session_10
       
-      # NOWEB engine - PALING RINGAN!
+      # WEBJS engine is often more stable for multi-session than NOWEB, but uses more RAM.
+      # However, for 10 sessions on 2GB RAM, we might need to stick to NOWEB or carefully tune.
+      # User asked for "1 corfee 2gig" and "kit tidak menggunakan low mem".
+      # So we can try WEBJS or just stick to NOWEB but with higher limits.
+      # Let's keep NOWEB as it is most efficient for 10 sessions on 2GB.
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
       
       # Webhook - Removed 'message' and 'message.any' to save resources
@@ -100,9 +104,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
         reservations:
-          memory: 128M
+          memory: 256M
 
   # Express Backend API
   backend:
@@ -158,9 +162,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          memory: 400M
         reservations:
-          memory: 200M
+          memory: 256M
 
   # Next.js Frontend
   frontend:
