@@ -131,8 +131,8 @@ services:
       - PORT=4000
       
       # Anti-Ban: Broadcast timing
-      - BROADCAST_START_HOUR=10
-      - BROADCAST_END_HOUR=22
+      - BROADCAST_START_HOUR=0
+      - BROADCAST_END_HOUR=24
       
       # Anti-Ban: Rate limiting
       - DAILY_MESSAGE_LIMIT=60

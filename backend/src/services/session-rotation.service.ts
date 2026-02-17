@@ -370,14 +370,12 @@ function getJakartaTodayStart(): Date {
  * Cek apakah sekarang dalam jam broadcast yang diizinkan
  */
 export function isWithinBroadcastHours(): boolean {
+    // ALWAYS ALLOW 24 HOURS
     const currentHour = getJakartaHour();
-    const isWithin = currentHour >= BROADCAST_START_HOUR && currentHour < BROADCAST_END_HOUR;
+    // const isWithin = currentHour >= BROADCAST_START_HOUR && currentHour < BROADCAST_END_HOUR;
 
-    if (!isWithin) {
-        console.log(`[SESSION-ROTATION] Outside broadcast hours. Current: ${currentHour}:00, Allowed: ${BROADCAST_START_HOUR}:00-${BROADCAST_END_HOUR}:00`);
-    }
-
-    return isWithin;
+    // Log sparingly (maybe once per hour logic, but here let's valid always)
+    return true;
 }
 
 /**
