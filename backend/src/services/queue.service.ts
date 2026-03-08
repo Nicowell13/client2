@@ -701,9 +701,10 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 }
 
 function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
-  // One worker per queue (per session) for parallel sending across sessions,
-  // while keeping sequential sending within each session.
-  queue.process(1, processCampaignJob);
+  // Process multiple messages simultaneously 
+  // queue.process(concurrency_per_worker, handler)
+  // We use 100 concurrency to send instantly
+  queue.process(100, processCampaignJob);
 
   queue.on('completed', async (job) => {
     const { campaignId, contactId } = job.data;
