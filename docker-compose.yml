@@ -87,30 +87,30 @@ services:
       - BACKEND_URL=https://api.watrix.online
 
       # Global send limiter (max simultaneous sends across all sessions)
-      - GLOBAL_SEND_CONCURRENCY=2
+      - GLOBAL_SEND_CONCURRENCY=150
 
       # Ensure backend uses the same API key as WAHA
       - WAHA_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
       - PORT=4000
       
       # Anti-Ban: Broadcast timing (Jakarta timezone, UTC+7)
-      - BROADCAST_START_HOUR=10
-      - BROADCAST_END_HOUR=22
+      - BROADCAST_START_HOUR=0
+      - BROADCAST_END_HOUR=24
       
       # Anti-Ban: Rate limiting
-      - DAILY_MESSAGE_LIMIT=40
-      - SESSION_JOB_LIMIT=40
-      - SESSION_CONTACT_LIMIT=40
-      - SESSION_REST_TRIGGER=30
-      - SESSION_REST_MINUTES=30
+      - DAILY_MESSAGE_LIMIT=1000000
+      - SESSION_JOB_LIMIT=1000000
+      - SESSION_CONTACT_LIMIT=1000000
+      - SESSION_REST_TRIGGER=0
+      - SESSION_REST_MINUTES=0
       
       # Anti-Ban: Message delays (in milliseconds)
-      - MESSAGE_DELAY_MIN_MS=30000
-      - MESSAGE_DELAY_MAX_MS=60000
+      - MESSAGE_DELAY_MIN_MS=0
+      - MESSAGE_DELAY_MAX_MS=0
       
       # Anti-Ban: Human-like behavior
-      - TYPING_INDICATOR_ENABLED=true
-      - READ_RECEIPT_ENABLED=true
+      - TYPING_INDICATOR_ENABLED=false
+      - READ_RECEIPT_ENABLED=false
     depends_on:
       - postgres
       - redis

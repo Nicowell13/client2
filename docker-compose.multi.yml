@@ -108,7 +108,7 @@ services:
       - WAHA_API_KEY=${WAHA_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - PORT=4000
-      - GLOBAL_SEND_CONCURRENCY=2
+      - GLOBAL_SEND_CONCURRENCY=150
     volumes:
       - ./backend/uploads:/app/uploads
     networks:
