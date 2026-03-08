@@ -61,32 +61,11 @@ function getTimeMultiplier(): number {
 }
 
 function calcMessageDelay(index: number): number {
-  // ⭐ FIRST MESSAGE: No delay to start campaign quickly
-  if (index === 0) {
-    return random(1000, 3000); // Just 1-3 seconds for first message
-  }
-
-  // Base delay 30-60 detik setiap pesan (natural human pace)
-  const base = random(30000, 60000);
-
-  // Setiap kelipatan 10 pesan: delay 2-3 menit (istirahat panjang)
-  const longBreak = index > 0 && index % 10 === 0 ? random(120000, 180000) : 0;
-
-  // Setiap kelipatan 5 pesan (tapi bukan kelipatan 10): delay 1.5 menit
-  const periodic = index > 0 && index % 5 === 0 && index % 10 !== 0 ? 90000 : 0;
-
-  // Apply time multiplier
-  const timeMultiplier = getTimeMultiplier();
-
-  const delay = Math.floor((base + periodic + longBreak) * timeMultiplier);
-
-  // Cap at 5 minutes max to accommodate longer delays
-  return Math.min(delay, 300000);
+  return 0; // User request: ubah delay antar pesan menjadi nol
 }
 
 function batchCooldown(batchIndex: number): number {
-  // Cooldown lebih panjang antar batch
-  return batchIndex === 0 ? 0 : random(45000, 75000);
+  return 0; // No cooldown between batches
 }
 
 function sleep(ms: number) {
@@ -468,8 +447,8 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
           console.warn(`[HUMAN] Typing indicator failed:`, typingError.message);
         }
 
-        // Extra random delay after typing
-        await sleep(random(500, 1500));
+        // Extra random delay after typing dihapus atas permintaan user: tidak ada jeda antar pesan
+        // await sleep(random(500, 1500));
       }
 
       // =========================================

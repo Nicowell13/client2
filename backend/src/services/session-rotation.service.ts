@@ -161,53 +161,7 @@ export async function incrementJobCount(sessionId: string): Promise<boolean> {
         }
     });
 
-    // Cek apakah mencapai hard limit (50 jobs)
-    if (session.jobCount >= JOB_LIMIT) {
-        // Selesai 1 season -> istirahat panjang (misal 60 menit atau menunggu reset manual/auto)
-        // Default behavior: stop working until reset
-        const restUntil = new Date(Date.now() + 60 * 60 * 1000); // Default 1 jam jika limit reached
-
-        await prisma.session.update({
-            where: { sessionId },
-            data: {
-                jobLimitReached: true,
-                restingUntil: restUntil
-            }
-        });
-
-        console.log(`[SESSION-ROTATION] Session ${session.name} reached HARD LIMIT (${JOB_LIMIT}), resting until ${restUntil.toISOString()}`);
-        return true;
-    }
-
-    // MULTI-STAGE RESTING LOGIC
-    // 10 pesan -> rest 15 menit
-    // 25 pesan -> rest 45 menit
-    // 40 pesan -> rest 15 menit
-    let restDurationMinutes = 0;
-
-    if (session.jobCount === 10) {
-        restDurationMinutes = 15;
-    } else if (session.jobCount === 25) {
-        restDurationMinutes = 45;
-    } else if (session.jobCount === 40) {
-        restDurationMinutes = 15;
-    }
-
-    if (restDurationMinutes > 0) {
-        const restUntil = new Date(Date.now() + restDurationMinutes * 60 * 1000);
-
-        await prisma.session.update({
-            where: { sessionId },
-            data: {
-                jobLimitReached: true, // Mark as limited so it's excluded from selection
-                restingUntil: restUntil
-            }
-        });
-
-        console.log(`[SESSION-ROTATION] Session ${session.name} reached REST TRIGGER (${session.jobCount} msgs), resting ${restDurationMinutes}min until ${restUntil.toISOString()}`);
-        return true;
-    }
-
+    // User request: tidak ada resting di nomer
     return false;
 }
 
@@ -421,10 +375,11 @@ export async function checkDailyLimit(sessionId: string): Promise<boolean> {
     const hasReached = session.dailyMessageCount >= DAILY_MESSAGE_LIMIT;
 
     if (hasReached) {
-        console.log(`[SESSION-ROTATION] Session ${sessionId} reached daily limit (${session.dailyMessageCount}/${DAILY_MESSAGE_LIMIT})`);
+        console.log(`[SESSION-ROTATION] Session ${sessionId} reached daily limit (${session.dailyMessageCount}/${DAILY_MESSAGE_LIMIT}) tapi dilanjutkan karena user request untuk tidak pindah session`);
     }
 
-    return hasReached;
+    // User request: pastikan pesan terus terkirim tidak pindah season
+    return false;
 }
 
 /**
