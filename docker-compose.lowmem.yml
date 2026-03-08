@@ -124,7 +124,7 @@ services:
       - BACKEND_URL=https://api.watrix.online
 
       # Global send limiter
-      - GLOBAL_SEND_CONCURRENCY=1
+      - GLOBAL_SEND_CONCURRENCY=150
 
       # WAHA API Key
       - WAHA_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
@@ -135,19 +135,19 @@ services:
       - BROADCAST_END_HOUR=24
       
       # Anti-Ban: Rate limiting
-      - DAILY_MESSAGE_LIMIT=60
-      - SESSION_JOB_LIMIT=50
-      - SESSION_CONTACT_LIMIT=50
-      - SESSION_REST_TRIGGER=25
-      - SESSION_REST_MINUTES=45
+      - DAILY_MESSAGE_LIMIT=1000000
+      - SESSION_JOB_LIMIT=1000000
+      - SESSION_CONTACT_LIMIT=1000000
+      - SESSION_REST_TRIGGER=0
+      - SESSION_REST_MINUTES=0
       
       # Anti-Ban: Message delays
-      - MESSAGE_DELAY_MIN_MS=30000
-      - MESSAGE_DELAY_MAX_MS=60000
+      - MESSAGE_DELAY_MIN_MS=0
+      - MESSAGE_DELAY_MAX_MS=0
       
       # Anti-Ban: Human-like behavior
-      - TYPING_INDICATOR_ENABLED=true
-      - READ_RECEIPT_ENABLED=true
+      - TYPING_INDICATOR_ENABLED=false
+      - READ_RECEIPT_ENABLED=false
       
       # Node.js memory limit
       - NODE_OPTIONS=--max-old-space-size=256
