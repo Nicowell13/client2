@@ -261,10 +261,10 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     });
 
     /* ===========================================================
-       >>>>>>>>>>>>>> ROUND-ROBIN SESSION ASSIGNMENT <<<<<<<<<<<<<<
+       >>>>>>>>>>>>>> SESSION-BASED DISTRIBUTION (150 per session) <<<<<<<<<<<<<<
     ============================================================ */
 
-    // Get all healthy sessions untuk round-robin
+    // Get all healthy sessions
     const healthySessions = await sessionRotation.getAllHealthySessions();
 
     if (healthySessions.length === 0) {
@@ -274,14 +274,12 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[CAMPAIGN] Using ${healthySessions.length} sessions for round-robin: ${healthySessions.map(s => s.name).join(', ')}`);
+    // Each session handles up to 150 contacts simultaneously
+    const CONTACTS_PER_SESSION = 150;
+    const maxContacts = healthySessions.length * CONTACTS_PER_SESSION;
 
-    // Batch configuration
-    const BATCH_SIZE = 500;
-    const batches = [];
-    for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
-      batches.push(contacts.slice(i, i + BATCH_SIZE));
-    }
+    console.log(`[CAMPAIGN] ${healthySessions.length} sessions × ${CONTACTS_PER_SESSION} contacts = ${maxContacts} max simultaneous sends`);
+    console.log(`[CAMPAIGN] Sessions: ${healthySessions.map(s => s.name).join(', ')}`);
 
     const btns = campaign.buttons.map((b) => ({
       label: b.label,
@@ -291,49 +289,52 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     // Use global queue for all sessions
     const campaignQueue = getCampaignQueue('global');
 
-    for (let b = 0; b < batches.length; b++) {
-      const batch = batches[b];
+    // Distribute contacts across sessions (150 per session, round-robin)
+    const jobPromises: Promise<any>[] = [];
 
-      for (let i = 0; i < batch.length; i++) {
-        const c = batch[i];
+    for (let i = 0; i < contacts.length; i++) {
+      const c = contacts[i];
+      const globalIndex = i;
 
-        // Global index untuk round-robin dan variant selection
-        const globalIndex = b * BATCH_SIZE + i;
+      // Sequential variant selection
+      const selectedMessage = variants[globalIndex % variants.length];
 
-        // Sequential variant selection
-        const selectedMessage = variants[globalIndex % variants.length];
+      // Round-robin: each session gets 150 contacts
+      const selectedSession = healthySessions[globalIndex % healthySessions.length];
 
-        // ⭐ ROUND-ROBIN: Pilih session berdasarkan global index
-        const selectedSession = healthySessions[globalIndex % healthySessions.length];
-
-        await campaignQueue.add({
+      // Add all jobs in parallel (no await per job)
+      jobPromises.push(
+        campaignQueue.add({
           campaignId: campaign.id,
           contactId: c.id,
           phoneNumber: c.phoneNumber,
           message: selectedMessage,
           imageUrl: campaign.imageUrl,
           buttons: btns,
-          sessionName: selectedSession.sessionId, // ⭐ Round-robin session
+          sessionName: selectedSession.sessionId,
           messageIndex: i,
-          batchIndex: b,
+          batchIndex: 0,
         }, {
-          // ⭐ Unique jobId prevents duplicate jobs
           jobId: `${campaign.id}_${c.id}`,
           removeOnComplete: 100,
           removeOnFail: 50,
-        });
-      }
+        })
+      );
     }
+
+    // Enqueue all jobs simultaneously
+    await Promise.all(jobPromises);
 
     /* ---------------------------
        RESPONSE
     ---------------------------- */
     return res.json({
       success: true,
-      message: `Campaign queued successfully in ${batches.length} batches`,
+      message: `Campaign queued: ${contacts.length} contacts across ${healthySessions.length} sessions (${CONTACTS_PER_SESSION} per session)`,
       data: {
         totalContacts: contacts.length,
-        totalBatches: batches.length,
+        totalSessions: healthySessions.length,
+        contactsPerSession: CONTACTS_PER_SESSION,
       },
     });
   } catch (error: any) {

@@ -1,8 +1,8 @@
 version: '3.8'
 
 # ============================================
-# DOCKER COMPOSE - LOW MEMORY VERSION
-# Untuk VPS 1 Core / 1GB RAM + Swap
+# DOCKER COMPOSE - BURST MODE VERSION
+# Untuk VPS 2GB RAM (10 session × 150 kontak)
 # ============================================
 
 services:
@@ -35,7 +35,7 @@ services:
       -c effective_cache_size=128MB
       -c work_mem=4MB
       -c maintenance_work_mem=32MB
-      -c max_connections=20
+      -c max_connections=100
 
   # Redis for Queue Management (memory-optimized)
   redis:
@@ -51,12 +51,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 256M
         reservations:
-          memory: 64M
+          memory: 128M
           
-    # Redis config: 100MB RAM, No Eviction (Safe for Queues)
-    command: redis-server --maxmemory 100mb --maxmemory-policy noeviction --stop-writes-on-bgsave-error no --save ""
+    # Redis config: 200MB RAM, No Eviction (Safe for Queues)
+    command: redis-server --maxmemory 200mb --maxmemory-policy noeviction --stop-writes-on-bgsave-error no --save ""
 
   # WAHA Plus with NOWEB engine (lightweight)
   waha:
@@ -104,9 +104,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
         reservations:
-          memory: 256M
+          memory: 512M
 
   # Express Backend API
   backend:
@@ -149,8 +149,8 @@ services:
       - TYPING_INDICATOR_ENABLED=false
       - READ_RECEIPT_ENABLED=false
       
-      # Node.js memory limit
-      - NODE_OPTIONS=--max-old-space-size=256
+      # Node.js memory limit (512MB for 150 concurrent jobs)
+      - NODE_OPTIONS=--max-old-space-size=512
       
     depends_on:
       - postgres
@@ -162,9 +162,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 400M
+          memory: 768M
         reservations:
-          memory: 256M
+          memory: 384M
 
   # Next.js Frontend
   frontend:

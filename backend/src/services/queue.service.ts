@@ -169,7 +169,6 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
     // ------------------------------------
     // ⭐ DEDUPLICATION: SKIP IF ALREADY SENT
-    // Prevents duplicate sends from recovery/retry
     // ------------------------------------
     const messageRecord = await prisma.message.findFirst({
       where: { campaignId, contactId },
@@ -177,242 +176,41 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
     });
 
     if (messageRecord?.status === 'sent' && messageRecord?.waMessageId) {
-      console.warn(`⚠ Message ${campaignId}/${contactId} already SENT (waId: ${messageRecord.waMessageId}); skipping duplicate`);
       return { success: true, skipped: true, reason: 'already-sent' };
     }
 
-    // Also skip if message record doesn't exist (might have been deleted)
     if (!messageRecord) {
-      console.warn(`⚠ Message record for ${campaignId}/${contactId} not found; skipping`);
       return { success: false, skipped: true, reason: 'message-missing' };
     }
 
     // ------------------------------------
-    // CHECK BROADCAST HOURS (ANTI-BAN)
-    // ------------------------------------
-    if (!sessionRotation.isWithinBroadcastHours()) {
-      console.log(`⏰ Outside broadcast hours, job will be delayed`);
-      // Re-queue dengan delay sampai jam broadcast mulai
-      throw new Error('Outside broadcast hours - will retry later');
-    }
-
-    // ------------------------------------
-    // CHECK DAILY LIMIT (ANTI-BAN)
-    // ------------------------------------
-    try {
-      const dailyLimitReached = await sessionRotation.checkDailyLimit(sessionName);
-      if (dailyLimitReached) {
-        console.log(`📊 Session ${sessionName} reached daily limit, marking for retry with other session`);
-        // Mark as waiting untuk di-pickup oleh session lain
-        await prisma.message.updateMany({
-          where: { campaignId, contactId, status: 'pending' },
-          data: {
-            status: 'waiting',
-            errorMsg: 'Daily limit reached, waiting for another session'
-          }
-        });
-        return { success: false, waiting: true, reason: 'daily-limit-reached' };
-      }
-    } catch (limitError: any) {
-      console.warn(`⚠ Daily limit check failed:`, limitError.message);
-      // Continue anyway - gagal check bukan berarti harus stop
-    }
-
-    // ------------------------------------
-    // BATCH COOLDOWN
-    // ------------------------------------
-    if (messageIndex === 0) {
-      const cooldown = batchCooldown(batchIndex);
-      console.log(`🧊 Batch ${batchIndex} cooldown ${cooldown}ms`);
-      await new Promise((r) => setTimeout(r, cooldown));
-    }
-
-    // ------------------------------------
-    // PER MESSAGE DELAY
-    // ------------------------------------
-    const delay = calcMessageDelay(messageIndex);
-    console.log(`⏳ Delay ${delay}ms before send (time multiplier: ${getTimeMultiplier()}x)`);
-    await new Promise((r) => setTimeout(r, delay));
-
-    // ------------------------------------
-    // TRACK ATTEMPT METADATA (for smart job assignment)
-    // ------------------------------------
-    await prisma.message.updateMany({
-      where: { campaignId, contactId, status: 'pending' },
-      data: {
-        lastAttemptAt: new Date(),
-        lastSessionId: sessionName
-      } as any
-    });
-
-    // ------------------------------------
-    // ⭐ CHECK IF SESSION IS RESTING (CRITICAL)
-    // If session reached job limit trigger, failover to another session
+    // SEND MESSAGE IMMEDIATELY (NO DELAY, NO CHECKS)
+    // User request: Meta Business Suite, simultaneous burst sending
     // ------------------------------------
     let activeSessionName = sessionName;
-
-    try {
-      const sessionRecord = await prisma.session.findFirst({
-        where: { sessionId: sessionName },
-        select: { id: true, jobLimitReached: true, restingUntil: true, name: true }
-      });
-
-      if (sessionRecord?.jobLimitReached && sessionRecord?.restingUntil && sessionRecord.restingUntil > new Date()) {
-        console.log(`☕ Session ${sessionName} is RESTING until ${sessionRecord.restingUntil.toISOString()}, looking for failover...`);
-
-        const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
-
-        if (failoverSession) {
-          activeSessionName = failoverSession.sessionId;
-          console.log(`✅ Resting failover: ${sessionName} → ${activeSessionName}`);
-        } else {
-          // No other session available - mark as waiting for later
-          console.log(`⏳ No failover available, marking message as waiting`);
-          await prisma.message.updateMany({
-            where: { campaignId, contactId, status: 'pending' },
-            data: {
-              status: 'waiting',
-              errorMsg: `Session ${sessionName} resting, no other session available`
-            }
-          });
-          return { success: false, waiting: true, reason: 'session-resting-no-failover' };
-        }
-      }
-    } catch (restingCheckError: any) {
-      console.warn(`⚠ Resting check failed for ${sessionName}:`, restingCheckError.message);
-      // Continue with original session if check fails
-    }
-
-    // ------------------------------------
-    // CHECK SESSION STATUS BEFORE SENDING (WITH FAILOVER)
-    // ------------------------------------
-
-    try {
-      const sessionStatus = await wahaService.getSessionStatus(sessionName);
-      const normalizedStatus = (sessionStatus?.status || '').toLowerCase();
-
-      if (!['working', 'ready', 'authenticated'].includes(normalizedStatus)) {
-        // Update session status in DB
-        const session = await prisma.session.findFirst({
-          where: { sessionId: sessionName },
-        });
-
-        if (session) {
-          await prisma.session.update({
-            where: { id: session.id },
-            data: { status: normalizedStatus || 'stopped' },
-          });
-        }
-
-        // ⭐ TRY FAILOVER TO ANOTHER SESSION
-        console.log(`⚠ Session ${sessionName} not active (${normalizedStatus}), trying failover...`);
-        const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
-
-        if (failoverSession) {
-          activeSessionName = failoverSession.sessionId;
-          console.log(`✅ Failover success: ${sessionName} → ${activeSessionName}`);
-        } else {
-          throw new Error(`Session ${sessionName} is not active and no failover available. Status: ${normalizedStatus}`);
-        }
-      }
-    } catch (statusError: any) {
-      // If status check fails, try failover first
-      console.warn(`⚠ Session ${sessionName} status check failed:`, statusError.message);
-
-      // ⭐ TRY FAILOVER
-      const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
-
-      if (failoverSession) {
-        activeSessionName = failoverSession.sessionId;
-        console.log(`✅ Failover on error: ${sessionName} → ${activeSessionName}`);
-      } else {
-        throw new Error(`Session ${sessionName} unavailable and no failover available`);
-      }
-    }
-
-    // ------------------------------------
-    // SEND MESSAGE
-    // ------------------------------------
-    await acquireGlobalSendSlot();
     let result: any;
-    try {
-      // Get contact info for template replacement
-      const contact = await prisma.contact.findUnique({
-        where: { id: contactId },
-        select: { id: true, name: true, phoneNumber: true }
-      });
 
-      if (!contact) {
-        throw new Error(`Contact ${contactId} not found`);
-      }
+    // Get contact info for template replacement
+    const contact = await prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { id: true, name: true, phoneNumber: true }
+    });
 
-      // =========================================
-      // HUMAN-LIKE BEHAVIOR (ANTI-BAN)
-      // =========================================
-
-      // 1. Set presence to available (online)
-      try {
-        await wahaService.setPresence(activeSessionName, 'available');
-      } catch (presenceError: any) {
-        console.warn(`[HUMAN] Presence set failed:`, presenceError.message);
-      }
-
-      // 2. Mark chat as seen (read receipt) - optional
-      if (READ_RECEIPT_ENABLED) {
-        try {
-          await wahaService.markChatAsSeen(activeSessionName, phoneNumber);
-        } catch (seenError: any) {
-          console.warn(`[HUMAN] Mark seen failed:`, seenError.message);
-        }
-      }
-
-      // 3. Send typing indicator before message
-      if (TYPING_INDICATOR_ENABLED) {
-        // Duration berdasarkan panjang pesan (min 2s, max 8s)
-        const typingDuration = Math.min(2000 + message.length * 30, 8000);
-        try {
-          await wahaService.sendTypingIndicator(activeSessionName, phoneNumber, typingDuration);
-        } catch (typingError: any) {
-          console.warn(`[HUMAN] Typing indicator failed:`, typingError.message);
-        }
-
-        // Extra random delay after typing dihapus atas permintaan user: tidak ada jeda antar pesan
-        // await sleep(random(500, 1500));
-      }
-
-      // =========================================
-      // CONTENT VARIATION (ANTI-BAN)
-      // =========================================
-
-      // Process message with all variations:
-      // - Spintext: {Hi|Halo|Hai} → random selection
-      // - {{nama}} → contact name
-      // - URL params → unique per contact
-      // - Fingerprint → invisible variations
-      const finalMessage = contentVariation.processMessageTemplate(message, contact);
-
-      // Log untuk debugging - termasuk info nama kontak dan session yang mengirim
-      console.log(`[SEND] [${activeSessionName}] Processing message for ${contact.phoneNumber} (Contact: ${contact.name})`);
-      console.log(`[CONTENT] Original: "${message.substring(0, 60)}..."`);
-      console.log(`[CONTENT] Final: "${finalMessage.substring(0, 60)}..."`);
-
-      // =========================================
-      // SEND THE MESSAGE
-      // =========================================
-      result = await wahaService.sendMessageWithButtons(
-        activeSessionName,
-        phoneNumber,
-        finalMessage,
-        imageUrl,
-        buttons
-      );
-    } finally {
-      try {
-        await releaseGlobalSendSlot();
-      } catch (e: any) {
-        console.warn('⚠ Failed to release global send slot:', e?.message || e);
-      }
+    if (!contact) {
+      throw new Error(`Contact ${contactId} not found`);
     }
+
+    // Process message with content variation
+    const finalMessage = contentVariation.processMessageTemplate(message, contact);
+
+    // SEND THE MESSAGE (direct, no rate limiting, no presence, no typing)
+    result = await wahaService.sendMessageWithButtons(
+      activeSessionName,
+      phoneNumber,
+      finalMessage,
+      imageUrl,
+      buttons
+    );
 
     const waMessageId = extractWAId(result);
 
@@ -430,56 +228,13 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
     await safeCampaignUpdate(campaignId, { sentCount: { increment: 1 } });
 
-    // ------------------------------------
-    // INCREMENT SESSION JOB COUNT
-    // ------------------------------------
-    try {
-      const limitReached = await sessionRotation.incrementJobCount(activeSessionName);
-      if (limitReached) {
-        console.log(`🛑 Session ${activeSessionName} reached job limit, will rest`);
-      }
-    } catch (jobCountError: any) {
-      console.warn(`⚠ Failed to increment job count:`, jobCountError.message);
-    }
-
-    // ------------------------------------
-    // INCREMENT DAILY COUNT (ANTI-BAN)
-    // ------------------------------------
-    try {
-      const dailyCount = await sessionRotation.incrementDailyCount(activeSessionName);
-      console.log(`📊 Session ${activeSessionName} daily count: ${dailyCount}/${sessionRotation.DAILY_MESSAGE_LIMIT}`);
-    } catch (dailyError: any) {
-      console.warn(`⚠ Failed to increment daily count:`, dailyError.message);
-    }
-
-    // ------------------------------------
-    // UPDATE QUALITY SCORE (SUCCESS)
-    // ------------------------------------
-    try {
-      await sessionRotation.updateQualityScore(activeSessionName, true, false);
-    } catch (qualityError: any) {
-      console.warn(`⚠ Failed to update quality score:`, qualityError.message);
-    }
-
-    // ------------------------------------
-    // SET CONTACT COOLDOWN (ANTI-SPAM)
-    // ------------------------------------
-    try {
-      await sessionRotation.setContactCooldown(contactId, 24); // 24 jam cooldown
-    } catch (cooldownError: any) {
-      console.warn(`⚠ Failed to set contact cooldown:`, cooldownError.message);
-    }
-
     return { success: true, messageId: waMessageId };
   } catch (error: any) {
     const errorMsg = String(error?.message || '');
 
     // =====================================================
-    // 🔥 NON-FATAL ERROR HANDLING (IMPORTANT FIX)
+    // 🔥 NON-FATAL ERROR HANDLING
     // =====================================================
-    // These errors indicate the message was sent successfully,
-    // but some optional feature (buttons, media processing) failed.
-    // We should mark as SENT to avoid confusion.
     const isNonFatalError =
       errorMsg.includes('addAnnotations') ||
       errorMsg.includes('processMedia') ||

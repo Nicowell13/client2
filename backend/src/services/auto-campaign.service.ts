@@ -129,10 +129,8 @@ async function sendCampaignRoundRobin(
       return { success: false, error: 'Campaign message is empty', sessionsUsed: 0 };
     }
 
-    // Get ALL contacts (Global pool)
-    // We strictly use the global pool now, ignoring session association
+    // Get ALL contacts (Global pool) - unlimited
     const contacts = await prisma.contact.findMany({
-      take: 500, // Hard limit 500 per campaign execution as per requirement
       orderBy: { createdAt: 'desc' }
     });
 
@@ -140,7 +138,9 @@ async function sendCampaignRoundRobin(
       return { success: false, error: 'No contacts found', sessionsUsed: 0 };
     }
 
-    console.log(`[AUTO-CAMPAIGN] Distributing ${contacts.length} contacts across ${allSessions.length} sessions`);
+    // Each session handles 150 contacts
+    const CONTACTS_PER_SESSION = 150;
+    console.log(`[AUTO-CAMPAIGN] Distributing ${contacts.length} contacts across ${allSessions.length} sessions (${CONTACTS_PER_SESSION} per session)`);
 
     // Update campaign status
     try {
@@ -172,7 +172,9 @@ async function sendCampaignRoundRobin(
       url: b.url,
     }));
 
-    // Round-Robin Distribution Loop
+    // Round-Robin Distribution with parallel enqueuing
+    const jobPromises: Promise<any>[] = [];
+
     for (let i = 0; i < contacts.length; i++) {
       const c = contacts[i];
 
@@ -183,8 +185,8 @@ async function sendCampaignRoundRobin(
       const selectedMessage = variants[i % variants.length];
       const campaignQueue = getCampaignQueue(currentSession.sessionId);
 
-      try {
-        await campaignQueue.add({
+      jobPromises.push(
+        campaignQueue.add({
           campaignId: campaign.id,
           contactId: c.id,
           phoneNumber: c.phoneNumber,
@@ -195,14 +197,17 @@ async function sendCampaignRoundRobin(
           messageIndex: i,
           batchIndex: 0,
         }, {
-          jobId: `${campaign.id}_${c.id}`, // Unique job ID
+          jobId: `${campaign.id}_${c.id}`,
           removeOnComplete: 100,
           removeOnFail: 50,
-        });
-      } catch (queueError: any) {
-        console.error(`[AUTO-CAMPAIGN] Failed to add job to queue for session ${currentSession.sessionId}:`, queueError.message);
-      }
+        }).catch((queueError: any) => {
+          console.error(`[AUTO-CAMPAIGN] Failed to add job for session ${currentSession.sessionId}:`, queueError.message);
+        })
+      );
     }
+
+    // Enqueue all jobs simultaneously
+    await Promise.all(jobPromises);
 
     console.log(
       `[AUTO-CAMPAIGN] Campaign "${campaign.name}" distributed across ${allSessions.length} sessions`
