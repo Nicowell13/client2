@@ -345,26 +345,6 @@ export default function SessionsPage() {
                     <div className="text-sm text-gray-600">
                       <span className="font-medium">Session ID:</span> {session.sessionId}
                     </div>
-                    {/* Job Count Display */}
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">
-                        <span className="font-medium">Jobs:</span> {(session as any).jobCount || 0}/50
-                      </span>
-                      {(session as any).jobLimitReached && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          <Coffee className="w-3 h-3" />
-                          Resting
-                        </span>
-                      )}
-                    </div>
-                    {/* Progress Bar */}
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all ${(session as any).jobLimitReached ? 'bg-yellow-500' : 'bg-blue-600'
-                          }`}
-                        style={{ width: `${Math.min(((session as any).jobCount || 0) / 50 * 100, 100)}%` }}
-                      ></div>
-                    </div>
                     <div className="flex gap-2 flex-wrap">
                       {!isConnectedStatus(session.status) && (
                         <Button
@@ -386,24 +366,6 @@ export default function SessionsPage() {
                         >
                           <Power className="w-4 h-4 mr-1" />
                           Stop
-                        </Button>
-                      )}
-                      {(session as any).jobLimitReached && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              await sessionAPI.resetJobs(session.id);
-                              toast.success(`Job count reset untuk ${session.name}`);
-                              fetchSessions();
-                            } catch (error: any) {
-                              toast.error(error?.response?.data?.message || 'Gagal reset jobs');
-                            }
-                          }}
-                        >
-                          <RotateCcw className="w-4 h-4 mr-1" />
-                          Reset
                         </Button>
                       )}
                       <Button
