@@ -4,7 +4,7 @@ import wahaService from './waha.service';
 import { getCampaignQueue } from './queue.service';
 
 const MAX_SESSIONS = 10;
-const DEFAULT_CAMPAIGN_DELAY_MS = 60000; // 1 minute delay between campaigns
+const DEFAULT_CAMPAIGN_DELAY_MS = 0; // User request: No delay between campaigns
 
 interface AutoCampaignConfig {
   delayBetweenCampaigns?: number; // Delay in milliseconds
