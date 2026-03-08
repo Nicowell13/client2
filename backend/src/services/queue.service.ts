@@ -38,8 +38,8 @@ interface CampaignJob {
 // Environment variable untuk kustomisasi delay
 const MESSAGE_DELAY_MIN_MS = Number(process.env.MESSAGE_DELAY_MIN_MS || 30000);
 const MESSAGE_DELAY_MAX_MS = Number(process.env.MESSAGE_DELAY_MAX_MS || 50000);
-const TYPING_INDICATOR_ENABLED = process.env.TYPING_INDICATOR_ENABLED !== 'false';
-const READ_RECEIPT_ENABLED = process.env.READ_RECEIPT_ENABLED !== 'false';
+const TYPING_INDICATOR_ENABLED = process.env.TYPING_INDICATOR_ENABLED === 'true'; // Default disabled for bulk send
+const READ_RECEIPT_ENABLED = process.env.READ_RECEIPT_ENABLED === 'true'; // Default disabled for bulk send
 
 function random(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -632,8 +632,8 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
   // Process multiple messages simultaneously 
   // queue.process(concurrency_per_worker, handler)
-  // We use 100 concurrency to send instantly
-  queue.process(100, processCampaignJob);
+  // We use 150 concurrency to send instantly
+  queue.process(150, processCampaignJob);
 
   queue.on('completed', async (job) => {
     const { campaignId, contactId } = job.data;

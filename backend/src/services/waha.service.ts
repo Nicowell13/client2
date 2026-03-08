@@ -405,10 +405,10 @@ class WahaService {
 
       console.log(`[WAHA] Typing indicator started for ${phoneNumber} (${durationMs}ms)`);
 
-      // Wait for duration
-      await new Promise((r) => setTimeout(r, durationMs));
+      // User Request: removed artificial sleep for simultaneous 0-delay sending
+      // await new Promise((r) => setTimeout(r, durationMs));
 
-      // Stop typing
+      // Stop typing (fire immediately after start to not block the node thread)
       await this.client.post('/api/stopTyping', {
         session: sessionName,
         chatId: `${phoneNumber}@c.us`,
