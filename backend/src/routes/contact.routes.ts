@@ -127,7 +127,7 @@ function parseCsvBuffer(buffer: Buffer): Promise<Array<{ name: string; phoneNumb
   });
 }
 
-const GLOBAL_CONTACT_LIMIT = 500;
+const GLOBAL_CONTACT_LIMIT = 10000000; // Effectively unlimited
 
 // Upload CSV contacts (supports single or multiple files)
 router.post('/upload', upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 20 }]), async (req: Request, res: Response) => {
