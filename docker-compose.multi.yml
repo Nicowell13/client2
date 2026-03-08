@@ -101,7 +101,7 @@ services:
     container_name: whatsapp-backend-${INSTANCE_NUM:-1}
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-whatsapp_user}:${POSTGRES_PASSWORD:-whatsapp_pass}@postgres:5432/${POSTGRES_DB:-whatsapp_db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-whatsapp_user}:${POSTGRES_PASSWORD:-whatsapp_pass}@postgres:5432/${POSTGRES_DB:-whatsapp_db}?connection_limit=50
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
       - WAHA_URL=http://waha:3000
       - BACKEND_URL=${BACKEND_URL:-https://api.example.com}

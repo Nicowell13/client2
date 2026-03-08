@@ -532,27 +532,16 @@ export async function setContactCooldown(contactId: string, hoursUntilCooldown: 
 // ========================================================
 
 /**
- * Get semua session yang healthy untuk round-robin
- * Criteria: connected, not resting, below daily limit, quality score OK
+ * Get semua session yang healthy (connected) untuk round-robin
+ * Burst mode: Only checks connection status, no limits/resting/quality filters
  */
 export async function getAllHealthySessions(): Promise<any[]> {
-    await resetRestedSessions();
-    await resetDailyCountsIfNewDay();
-
     const sessions = await prisma.session.findMany({
         where: {
             status: { in: ACTIVE_STATUSES },
-            jobLimitReached: false,
-            dailyMessageCount: { lt: DAILY_MESSAGE_LIMIT },
-            qualityScore: { gte: QUALITY_MIN_THRESHOLD },
-            OR: [
-                { restingUntil: null },
-                { restingUntil: { lt: new Date() } }
-            ]
         },
         orderBy: [
-            { qualityScore: 'desc' },  // Prioritas quality tertinggi
-            { jobCount: 'asc' }        // Lalu yang paling sedikit bekerja
+            { createdAt: 'asc' }
         ]
     });
 

@@ -81,7 +81,7 @@ services:
       - "4000:4000"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://whatsapp_user:whatsapp_pass@postgres:5432/whatsapp_db
+      - DATABASE_URL=postgresql://whatsapp_user:whatsapp_pass@postgres:5432/whatsapp_db?connection_limit=50
       - REDIS_URL=redis://redis:6379
       - WAHA_URL=http://waha:3000
       - BACKEND_URL=https://api.watrix.online

@@ -19,33 +19,34 @@ async function getActiveSessions() {
     take: MAX_SESSIONS,
   });
 
-  // Refresh status from WAHA
-  const activeSessions = [];
-  for (const session of sessions) {
-    try {
-      const status = await wahaService.getSessionStatus(session.sessionId);
-      const normalizedStatus = (status?.status || session.status || '').toLowerCase();
+  // Refresh status from WAHA — all sessions checked in PARALLEL
+  const results = await Promise.allSettled(
+    sessions.map(async (session) => {
+      try {
+        const status = await wahaService.getSessionStatus(session.sessionId);
+        const normalizedStatus = (status?.status || session.status || '').toLowerCase();
 
-      if (['working', 'ready', 'authenticated'].includes(normalizedStatus)) {
-        await prisma.session.update({
-          where: { id: session.id },
-          data: {
-            status: status?.status || session.status,
-            phoneNumber: status?.me?.id || session.phoneNumber,
-          },
-        });
+        if (['working', 'ready', 'authenticated'].includes(normalizedStatus)) {
+          await prisma.session.update({
+            where: { id: session.id },
+            data: {
+              status: status?.status || session.status,
+              phoneNumber: status?.me?.id || session.phoneNumber,
+            },
+          });
 
-        activeSessions.push({
-          ...session,
-          status: status?.status || session.status,
-        });
+          return { ...session, status: status?.status || session.status };
+        }
+      } catch (e) {
+        console.warn(`[AUTO-CAMPAIGN] Session ${session.sessionId} unreachable, skipping`);
       }
-    } catch (e) {
-      console.warn(`[AUTO-CAMPAIGN] Session ${session.sessionId} unreachable, skipping`);
-    }
-  }
+      return null;
+    })
+  );
 
-  return activeSessions;
+  return results
+    .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value !== null)
+    .map((r) => r.value);
 }
 
 /**
@@ -288,11 +289,7 @@ export async function executeAutoCampaigns(config: AutoCampaignConfig = {}) {
       error: result.error,
     });
 
-    // Delay before next campaign (except for last one)
-    if (i < campaigns.length - 1) {
-      console.log(`[AUTO-CAMPAIGN] Waiting ${delayBetweenCampaigns}ms before next campaign...`);
-      await new Promise((resolve) => setTimeout(resolve, delayBetweenCampaigns));
-    }
+    // No delay between campaigns (burst mode)
   }
 
   const successCount = results.filter((r) => r.success).length;
