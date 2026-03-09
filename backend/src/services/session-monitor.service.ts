@@ -187,6 +187,12 @@ async function handleSessionLogout(sessionId: string, sessionDbId: string): Prom
     });
 
     // 3. Mark semua pending messages dari campaign yang menggunakan session ini sebagai waiting
+    // ❌ DISABLED: We no longer hijack pending messages to 'waiting' state en masse.
+    // This previously sabotaged the queue worker's organic auto-failover logic.
+    // The queue worker will now naturally detect the session is 'stopped' on its next job, 
+    // and seamlessly migrate pending jobs to a healthy session one by one.
+    
+    // Get active campaigns for UI session reassignment
     const activeCampaigns = await prisma.campaign.findMany({
         where: {
             sessionId: sessionDbId,
@@ -194,47 +200,6 @@ async function handleSessionLogout(sessionId: string, sessionDbId: string): Prom
         },
         select: { id: true, name: true }
     });
-
-    for (const campaign of activeCampaigns) {
-        const result = await prisma.message.updateMany({
-            where: {
-                campaignId: campaign.id,
-                status: 'pending'
-            },
-            data: {
-                status: 'waiting',
-                errorMsg: `Session ${sessionId} logged out, waiting for redistribution`,
-                lastAttemptAt: new Date(),
-                lastSessionId: sessionId
-            } as any
-        });
-
-        if (result.count > 0) {
-            console.log(`[SESSION-MONITOR] Marked ${result.count} pending messages as waiting for campaign ${campaign.name}`);
-        }
-
-        // Emit campaign update
-        const updatedCampaign = await prisma.campaign.findUnique({
-            where: { id: campaign.id },
-            select: {
-                id: true,
-                status: true,
-                sentCount: true,
-                failedCount: true,
-                totalContacts: true
-            }
-        });
-
-        if (updatedCampaign) {
-            emitCampaignUpdate({
-                campaignId: updatedCampaign.id,
-                status: updatedCampaign.status,
-                sentCount: updatedCampaign.sentCount,
-                failedCount: updatedCampaign.failedCount,
-                totalContacts: updatedCampaign.totalContacts
-            });
-        }
-    }
 
     // 4. Trigger immediate redistribution
     console.log(`[SESSION-MONITOR] Triggering immediate redistribution after logout`);
