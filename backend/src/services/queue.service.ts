@@ -36,10 +36,10 @@ interface CampaignJob {
 // ========================================================
 
 // Environment variable untuk kustomisasi delay
-const MESSAGE_DELAY_MIN_MS = Number(process.env.MESSAGE_DELAY_MIN_MS || 30000);
-const MESSAGE_DELAY_MAX_MS = Number(process.env.MESSAGE_DELAY_MAX_MS || 50000);
-const TYPING_INDICATOR_ENABLED = process.env.TYPING_INDICATOR_ENABLED === 'true'; // Default disabled for bulk send
-const READ_RECEIPT_ENABLED = process.env.READ_RECEIPT_ENABLED === 'true'; // Default disabled for bulk send
+const MESSAGE_DELAY_MIN_MS = Number(process.env.MESSAGE_DELAY_MIN_MS || 0);
+const MESSAGE_DELAY_MAX_MS = Number(process.env.MESSAGE_DELAY_MAX_MS || 0);
+const TYPING_INDICATOR_ENABLED = false; // Disabled for bulk send max speed
+const READ_RECEIPT_ENABLED = false; // Disabled for bulk send max speed
 
 function random(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -49,16 +49,16 @@ function random(min: number, max: number) {
  * Get time-based delay multiplier
  * Pagi lebih lambat, siang normal, malam sedikit lebih lambat
  */
-function getTimeMultiplier(): number {
-  const hour = new Date().getHours();
+//function getTimeMultiplier(): number {
+//const hour = new Date().getHours();
 
-  if (hour >= 10 && hour < 12) return 1.3;  // Pagi: lebih lambat
-  if (hour >= 12 && hour < 18) return 1.0;  // Siang: normal
-  if (hour >= 18 && hour < 20) return 1.1;  // Sore: sedikit lambat
-  if (hour >= 20 && hour < 22) return 1.2;  // Malam: lebih lambat
+//if (hour >= 10 && hour < 12) return 1.3;  // Pagi: lebih lambat
+//if (hour >= 12 && hour < 18) return 1.0;  // Siang: normal
+//if (hour >= 18 && hour < 20) return 1.1;  // Sore: sedikit lambat
+//if (hour >= 20 && hour < 22) return 1.2;  // Malam: lebih lambat
 
-  return 1.5; // Di luar jam kerja: sangat lambat (jika masih berjalan)
-}
+//return 1.5; // Di luar jam kerja: sangat lambat (jika masih berjalan)
+//}
 
 function calcMessageDelay(index: number): number {
   return 0; // User request: ubah delay antar pesan menjadi nol
@@ -385,10 +385,9 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 }
 
 function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
-  // Process multiple messages simultaneously, but throttle to 15 at a time
-  // to avoid overwhelming WAHA's HTTP server and causing 60s timeouts
-  // (15 concurrency means 15 messages sent in parallel to WAHA)
-  queue.process(15, processCampaignJob);
+  // Sesuai permintaan: mencoba menembak WAHA dengan 60 pesan paralel (bersamaan).
+  // Jika WAHA timeout (60s), Anda bisa menurunkan angka ini nanti menjadi 30 atau 40.
+  queue.process(60, processCampaignJob);
 
   queue.on('completed', async (job) => {
     const { campaignId, contactId } = job.data;
