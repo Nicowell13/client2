@@ -14,6 +14,9 @@ export interface ScreenshotResponse {
   data: any;
 }
 
+import http from 'http';
+import https from 'https';
+
 class WahaService {
   private client: AxiosInstance;
   private baseUrl: string;
@@ -25,9 +28,15 @@ class WahaService {
     this.apiKey = process.env.WAHA_API_KEY || '';
     this.requestTimeoutMs = Number(process.env.WAHA_TIMEOUT_MS || 60000);
 
+    // Use a custom agent to allow connection pooling and avoid socket exhaustion
+    const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+    const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
     this.client = axios.create({
       baseURL: this.baseUrl,
       timeout: this.requestTimeoutMs,
+      httpAgent,
+      httpsAgent,
       headers: {
         'Content-Type': 'application/json',
         ...(this.apiKey && { 'X-Api-Key': this.apiKey }),

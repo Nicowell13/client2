@@ -385,10 +385,10 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 }
 
 function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
-  // Process multiple messages simultaneously 
-  // queue.process(concurrency_per_worker, handler)
-  // We use 150 concurrency to send instantly
-  queue.process(150, processCampaignJob);
+  // Process multiple messages simultaneously, but throttle to 15 at a time
+  // to avoid overwhelming WAHA's HTTP server and causing 60s timeouts
+  // (15 concurrency means 15 messages sent in parallel to WAHA)
+  queue.process(15, processCampaignJob);
 
   queue.on('completed', async (job) => {
     const { campaignId, contactId } = job.data;
