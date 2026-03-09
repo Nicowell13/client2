@@ -342,23 +342,50 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
         }
 
         // =====================================================
-        // MARK AS WAITING (FOR RETRY WITH OTHER SESSION)
+        // TRY IMMEDIATE FAILOVER RETRY INSTEAD OF WAITING
         // =====================================================
-        console.log(`⏳ Marking message as 'waiting' for retry (attempt ${currentRetryCount + 1}/${maxRetries})`);
+        console.log(`⏳ Attempting failover for message (attempt ${currentRetryCount + 1}/${maxRetries})`);
 
-        await prisma.message.updateMany({
-          where: { campaignId, contactId, status: 'pending' },
-          data: {
-            status: 'waiting',
-            errorMsg: `Session unavailable, waiting for retry (${currentRetryCount + 1}/${maxRetries}): ${errorMsg.substring(0, 80)}`,
-            retryCount: { increment: 1 },
-            lastAttemptAt: new Date(),
-            lastSessionId: sessionName
-          } as any, // Type assertion karena field baru
-        });
+        const failoverSession = await sessionRotation.getFailoverSession(sessionName, messageIndex);
 
-        // Jangan increment failedCount karena akan di-retry
-        return { success: false, waiting: true, reason: 'session-unavailable' };
+        if (failoverSession) {
+          console.log(`✅ Failover found: ${failoverSession.sessionId}. Re-queueing job.`);
+          
+          await prisma.message.updateMany({
+            where: { campaignId, contactId, status: 'pending' },
+            data: {
+              retryCount: { increment: 1 },
+              lastAttemptAt: new Date(),
+              lastSessionId: sessionName
+            } as any,
+          });
+
+          // Re-add to queue back with new session
+          const campaignQueue = getCampaignQueue('global');
+          await campaignQueue.add({
+            ...job.data,
+            sessionName: failoverSession.sessionId
+          }, {
+            delay: 1000,
+            jobId: `${campaignId}_${contactId}_retry_${currentRetryCount}`
+          });
+
+          return { success: false, waiting: false, retry: true, reason: 'session-failover' };
+        } else {
+          // No failover found, put to waiting
+          console.log(`⏳ No failover session available. Marking message as 'waiting'`);
+          await prisma.message.updateMany({
+            where: { campaignId, contactId, status: 'pending' },
+            data: {
+              status: 'waiting',
+              errorMsg: `Session unavailable, no failover. Waiting. (${currentRetryCount + 1}/${maxRetries}): ${errorMsg.substring(0, 80)}`,
+              retryCount: { increment: 1 },
+              lastAttemptAt: new Date(),
+              lastSessionId: sessionName
+            } as any,
+          });
+          return { success: false, waiting: true, reason: 'session-unavailable-no-failover' };
+        }
       }
 
       // Fallback jika message tidak ditemukan
