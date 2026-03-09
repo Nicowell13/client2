@@ -109,6 +109,25 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - PORT=4000
       - GLOBAL_SEND_CONCURRENCY=150
+
+      # Broadcast timing (no restriction)
+      - BROADCAST_START_HOUR=0
+      - BROADCAST_END_HOUR=24
+
+      # Rate limiting (unlimited)
+      - DAILY_MESSAGE_LIMIT=1000000
+      - SESSION_JOB_LIMIT=1000000
+      - SESSION_CONTACT_LIMIT=1000000
+      - SESSION_REST_TRIGGER=0
+      - SESSION_REST_MINUTES=0
+
+      # Message delays (zero)
+      - MESSAGE_DELAY_MIN_MS=0
+      - MESSAGE_DELAY_MAX_MS=0
+
+      # Human-like behavior (disabled)
+      - TYPING_INDICATOR_ENABLED=false
+      - READ_RECEIPT_ENABLED=false
     volumes:
       - ./backend/uploads:/app/uploads
     networks:
