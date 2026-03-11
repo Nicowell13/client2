@@ -122,6 +122,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.example.com}
     container_name: whatsapp-frontend-${INSTANCE_NUM:-1}
+    ports:
+      - "${PORT_FRONTEND:-3001}:3001"
     environment:
       - PORT=3001
       - NODE_ENV=production
@@ -146,35 +148,7 @@ services:
       backend:
         condition: service_healthy
 
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    container_name: whatsapp-nginx-${INSTANCE_NUM:-1}
-    ports:
-      - "${PORT_FRONTEND:-8080}:80"
-      - "${PORT_BACKEND:-8081}:81"
-    volumes:
-      - ./nginx/nginx-aws.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      - whatsapp-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 128M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
-    depends_on:
-      - frontend
-      - backend
+
 
 networks:
   whatsapp-network:
