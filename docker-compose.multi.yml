@@ -67,7 +67,7 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
       - JWT_SECRET=${JWT_SECRET}
       - PORT=4000
-      - GLOBAL_SEND_CONCURRENCY=60
+      - GLOBAL_SEND_CONCURRENCY=200
 
       # Broadcast timing (no restriction)
       - BROADCAST_START_HOUR=0

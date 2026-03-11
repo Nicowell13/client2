@@ -246,8 +246,9 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
     }
 
-    // Each session handles up to 60 contacts simultaneously (Baileys direct)
-    const CONTACTS_PER_SESSION = 60;
+    // 🚀 BURST MODE: Each session fires 200 messages simultaneously
+    // Meta bypass: all messages sent at the exact same millisecond
+    const CONTACTS_PER_SESSION = Number(process.env.GLOBAL_SEND_CONCURRENCY || 200);
     const maxContacts = healthySessions.length * CONTACTS_PER_SESSION;
 
     console.log(`[CAMPAIGN] ${healthySessions.length} sessions × ${CONTACTS_PER_SESSION} contacts = ${maxContacts} max simultaneous sends`);

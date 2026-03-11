@@ -61,10 +61,9 @@ function random(min: number, max: number) {
 //}
 
 export function calcMessageDelay(index: number): number {
-  // Linear delay: 1000ms / 50 pesanan = 20ms per pesan
-  // Pesan ke-0 = 0ms, Pesan ke-1 = 20ms, Pesan ke-2 = 40ms, dst.
-  // Ini mendistribusikan 50 pesan secara sangat merata dalam 1 detik.
-  return index * 20; 
+  // 🚀 BURST MODE: Zero delay = all messages fire at the EXACT same millisecond
+  // Meta Business Suite bug: simultaneous burst bypasses spam detection
+  return 0;
 }
 
 function batchCooldown(batchIndex: number): number {
@@ -415,10 +414,12 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 }
 
 function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
-  // WAHA (NOWEB Baileys) crashed and returned HTTP 422 (Session FAILED) when hit with 60 simultaneous requests.
-  // This means the internal WhatsApp engine cannot handle that spike.
-  // SET CONCURRENCY TO 60 (Direct Baileys Node.js Backend can handle this gracefully)
-  queue.process(60, processCampaignJob);
+  // 🚀 BURST MODE: Direct Baileys WebSocket can handle massive concurrency
+  // 200 simultaneous sends per session - all fired at the same millisecond
+  // Safe on 2GB VPS + swap because Baileys reuses a single WebSocket per session
+  const BURST_CONCURRENCY = Number(process.env.GLOBAL_SEND_CONCURRENCY || 200);
+  queue.process(BURST_CONCURRENCY, processCampaignJob);
+  console.log(`🚀 [QUEUE] Burst concurrency set to ${BURST_CONCURRENCY}`);
 
   queue.on('completed', async (job) => {
     const { campaignId, contactId } = job.data;
