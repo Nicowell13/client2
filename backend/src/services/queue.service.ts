@@ -417,8 +417,8 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 function attachQueueHandlers(queue: Bull.Queue<CampaignJob>) {
   // WAHA (NOWEB Baileys) crashed and returned HTTP 422 (Session FAILED) when hit with 60 simultaneous requests.
   // This means the internal WhatsApp engine cannot handle that spike.
-  // 25 is a very safe but high-speed upper limit for stable bulk sending on a 2GB VPS without crashing WAHA.
-  queue.process(25, processCampaignJob);
+  // SET CONCURRENCY TO 60 (Direct Baileys Node.js Backend can handle this gracefully)
+  queue.process(60, processCampaignJob);
 
   queue.on('completed', async (job) => {
     const { campaignId, contactId } = job.data;

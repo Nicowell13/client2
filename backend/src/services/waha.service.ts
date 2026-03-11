@@ -1,506 +1,227 @@
-// backend/src/services/waha.service.ts
-import axios, { AxiosInstance } from 'axios';
+import makeWASocket, {
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore,
+} from '@whiskeysockets/baileys';
+import Pino from 'pino';
+import * as fs from 'fs';
+import * as path from 'path';
+import QRCode from 'qrcode';
+import { emitSessionUpdate } from './socket.service';
+import prisma from '../lib/prisma'; // Optional: if you update DB directly from here, but usually caller does it.
 
-export type QRFormat = 'json' | 'png' | 'raw';
+const logger = Pino({ level: 'silent' });
 
-export interface QRResponse {
-  format: QRFormat;
-  // bebas; tergantung WAHA, jadi pakai any saja
-  data: any;
+interface SessionData {
+    sock: ReturnType<typeof makeWASocket>;
+    qr: string | null;
+    status: 'STARTING' | 'WORKING' | 'STOPPED' | 'FAILED';
+    phone: string | null;
 }
 
-export interface ScreenshotResponse {
-  format: 'json' | 'jpeg';
-  data: any;
-}
+class BaileysService {
+    private sessions: Map<string, SessionData> = new Map();
+    private sessionsDir = path.join(process.cwd(), 'sessions');
 
-import http from 'http';
-import https from 'https';
-
-class WahaService {
-  private client: AxiosInstance;
-  private baseUrl: string;
-  private apiKey: string;
-  private readonly requestTimeoutMs: number;
-
-  constructor() {
-    this.baseUrl = process.env.WAHA_URL || 'http://localhost:3000';
-    this.apiKey = process.env.WAHA_API_KEY || '';
-    this.requestTimeoutMs = Number(process.env.WAHA_TIMEOUT_MS || 60000);
-
-    // Use a custom agent to allow connection pooling and avoid socket exhaustion
-    const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
-    const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
-
-    this.client = axios.create({
-      baseURL: this.baseUrl,
-      timeout: this.requestTimeoutMs,
-      httpAgent,
-      httpsAgent,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.apiKey && { 'X-Api-Key': this.apiKey }),
-        ...(this.apiKey && { 'x-api-key': this.apiKey }),
-      },
-    });
-
-    console.log(
-      '[WAHA] Base URL:',
-      this.baseUrl,
-      '| API key set:',
-      !!this.apiKey,
-      '| timeout(ms):',
-      this.requestTimeoutMs
-    );
-  }
-
-  private formatAxiosError(error: any): string {
-    if (error?.code === 'ECONNABORTED') return `WAHA request timeout after ${this.requestTimeoutMs}ms`;
-    if (error?.response?.status) {
-      const status = error.response.status;
-      const data = typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data);
-      return `WAHA HTTP ${status}: ${data}`;
-    }
-    return String(error?.message || 'Unknown error');
-  }
-
-  // ===== Session Management =====
-
-  async startSession(sessionName: string = 'default') {
-    try {
-      const response = await this.client.post('/api/sessions/start', {
-        name: sessionName,
-        config: {
-          proxy: null,
-          webhooks: [
-            {
-              url: `${process.env.BACKEND_URL || 'http://backend:4000'}/webhook/whatsapp`,
-              events: ['message', 'session.status'],
-            },
-          ],
-        },
-      });
-
-      return response.data;
-    } catch (error: any) {
-      console.error('[WAHA] Failed to start session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to start session: ${error?.message || 'Unknown error'}`);
-    }
-  }
-
-  async stopSession(sessionName: string = 'default') {
-    try {
-      // WAHA variants differ by version; try a couple of common routes.
-      const candidates: Array<() => Promise<any>> = [
-        () => this.client.post('/api/sessions/stop', { name: sessionName }, { validateStatus: () => true }),
-        () => this.client.post(`/api/sessions/${encodeURIComponent(sessionName)}/stop`, {}, { validateStatus: () => true }),
-      ];
-
-      let last: any = null;
-      for (const call of candidates) {
-        const resp = await call();
-        last = resp;
-        if (resp.status >= 200 && resp.status < 300) return resp.data;
-      }
-
-      throw new Error(
-        `WAHA stop failed (status ${last?.status ?? 'unknown'}): ${typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
-        }`
-      );
-    } catch (error: any) {
-      console.error('[WAHA] Failed to stop session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to stop session: ${this.formatAxiosError(error)}`);
-    }
-  }
-
-  async logoutSession(sessionName: string = 'default') {
-    try {
-      // WAHA variants differ by version; try a couple of common routes.
-      const candidates: Array<() => Promise<any>> = [
-        () => this.client.post('/api/sessions/logout', { name: sessionName }, { validateStatus: () => true }),
-        () => this.client.post(`/api/sessions/${encodeURIComponent(sessionName)}/logout`, {}, { validateStatus: () => true }),
-      ];
-
-      let last: any = null;
-      for (const call of candidates) {
-        const resp = await call();
-        last = resp;
-        if (resp.status >= 200 && resp.status < 300) return resp.data;
-      }
-
-      throw new Error(
-        `WAHA logout failed (status ${last?.status ?? 'unknown'}): ${typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
-        }`
-      );
-    } catch (error: any) {
-      console.error('[WAHA] Failed to logout session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to logout session: ${this.formatAxiosError(error)}`);
-    }
-  }
-
-  async deleteSession(sessionName: string = 'default') {
-    try {
-      // Confirmed by user curl: DELETE /api/sessions/:name
-      // Keep a fallback for older variants.
-      const candidates: Array<() => Promise<any>> = [
-        () => this.client.delete(`/api/sessions/${encodeURIComponent(sessionName)}`, { validateStatus: () => true }),
-        () => this.client.post('/api/sessions/delete', { name: sessionName }, { validateStatus: () => true }),
-      ];
-
-      let last: any = null;
-      for (const call of candidates) {
-        const resp = await call();
-        last = resp;
-        if (resp.status >= 200 && resp.status < 300) return resp.data;
-      }
-
-      throw new Error(
-        `WAHA delete failed (status ${last?.status ?? 'unknown'}): ${typeof last?.data === 'string' ? last.data : JSON.stringify(last?.data)
-        }`
-      );
-    } catch (error: any) {
-      console.error('[WAHA] Failed to delete session:', error?.response?.data || error?.message);
-      throw new Error(`Failed to delete session: ${this.formatAxiosError(error)}`);
-    }
-  }
-
-  async getQRCode(sessionName: string = 'default'): Promise<QRResponse> {
-    try {
-      // 1. JSON (base64)
-      const jsonResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
-        headers: { accept: 'application/json' },
-        params: { format: 'image' },
-        validateStatus: () => true,
-      });
-
-      if (jsonResp.status === 200 && jsonResp.data) {
-        return { format: 'json', data: jsonResp.data };
-      }
-
-      // 2. PNG binary
-      const pngResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
-        headers: { accept: 'image/png' },
-        params: { format: 'image' },
-        responseType: 'arraybuffer',
-        validateStatus: () => true,
-      });
-
-      if (pngResp.status === 200 && pngResp.data) {
-        const base64 = Buffer.from(pngResp.data, 'binary').toString('base64');
-        return { format: 'png', data: `data:image/png;base64,${base64}` };
-      }
-
-      // 3. Raw text value
-      const rawResp = await this.client.get(`/api/${encodeURIComponent(sessionName)}/auth/qr`, {
-        headers: { accept: 'application/json' },
-        params: { format: 'raw' },
-        validateStatus: () => true,
-      });
-
-      if (rawResp.status === 200 && rawResp.data) {
-        return { format: 'raw', data: rawResp.data };
-      }
-
-      console.error('[WAHA][QR] All formats failed', {
-        jsonStatus: jsonResp.status,
-        pngStatus: pngResp.status,
-        rawStatus: rawResp.status,
-      });
-
-      throw new Error('WAHA QR endpoint returned non-200 for all formats');
-    } catch (error: any) {
-      console.error('[WAHA][QR] Failed to get QR code:', error?.response?.data || error?.message);
-      throw new Error(`Failed to get QR code: ${error?.message || 'Unknown error'}`);
-    }
-  }
-
-  async requestPairingCode(sessionName: string, phoneNumber: string) {
-    try {
-      const response = await this.client.post(
-        `/api/${encodeURIComponent(sessionName)}/auth/request-code`,
-        { phoneNumber },
-        {
-          headers: { 'Content-Type': 'application/json' },
-          validateStatus: () => true,
+    constructor() {
+        if (!fs.existsSync(this.sessionsDir)) {
+            fs.mkdirSync(this.sessionsDir, { recursive: true });
         }
-      );
+    }
 
-      if (response.status < 200 || response.status >= 300) {
-        console.error('[WAHA][PAIR] Non-2xx response', {
-          status: response.status,
-          data: response.data,
+    private getSessionDir(sessionId: string) {
+        return path.join(this.sessionsDir, `session-${sessionId}`);
+    }
+
+    async startSession(sessionId: string) {
+        console.log(`[BAILEYS] Starting session: ${sessionId}`);
+        
+        if (this.sessions.has(sessionId)) {
+            const current = this.sessions.get(sessionId)!;
+            if (current.status === 'WORKING') return { success: true, message: 'Already running' };
+        }
+
+        const sessionDir = this.getSessionDir(sessionId);
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+
+        const sock = makeWASocket({
+            version,
+            logger,
+            printQRInTerminal: false,
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
+            generateHighQualityLinkPreview: true,
+            browser: ['WA Broadcast V2', 'Chrome', '1.0.0'], // Mimic Ninja
         });
-        throw new Error(`WAHA pairing endpoint returned ${response.status}`);
-      }
 
-      return response.data;
-    } catch (error: any) {
-      console.error('[WAHA][PAIR] Failed to request pairing code:', error?.response?.data || error?.message);
-      throw new Error(`Failed to request pairing code: ${error?.message || 'Unknown error'}`);
+        const sessionData: SessionData = {
+            sock,
+            qr: null,
+            status: 'STARTING',
+            phone: state.creds.me?.id ? state.creds.me.id.split(':')[0] : null,
+        };
+
+        this.sessions.set(sessionId, sessionData);
+
+        sock.ev.on('creds.update', saveCreds);
+
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+
+            if (qr) {
+                console.log(`[BAILEYS] QR generated for ${sessionId}`);
+                try {
+                    const qrDataUrl = await QRCode.toDataURL(qr);
+                    sessionData.qr = qrDataUrl;
+                    sessionData.status = 'STARTING';
+                    
+                    emitSessionUpdate({
+                        sessionId,
+                        status: 'STARTING',
+                        phoneNumber: null,
+                    });
+                } catch (e) {
+                    console.error('[BAILEYS] QR Generate Error:', e);
+                }
+            }
+
+            if (connection === 'close') {
+                const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
+                console.log(`[BAILEYS] Session ${sessionId} closed. Reconnect: ${shouldReconnect}`);
+                
+                if (shouldReconnect) {
+                    sessionData.status = 'STARTING';
+                    // Optional backoff reconnect
+                    setTimeout(() => this.startSession(sessionId), 5000);
+                } else {
+                    sessionData.status = 'STOPPED';
+                    sessionData.qr = null;
+                    if (fs.existsSync(sessionDir)) {
+                        fs.rmSync(sessionDir, { recursive: true, force: true });
+                    }
+                    emitSessionUpdate({ sessionId, status: 'stopped', phoneNumber: null });
+                }
+            } else if (connection === 'open') {
+                console.log(`[BAILEYS] Session ${sessionId} connected!`);
+                sessionData.status = 'WORKING';
+                sessionData.qr = null;
+                sessionData.phone = sock.user?.id ? sock.user.id.split(':')[0] : null;
+                
+                emitSessionUpdate({
+                    sessionId,
+                    status: 'working',
+                    phoneNumber: sessionData.phone,
+                });
+            }
+        });
+
+        return { success: true, sessionId };
     }
-  }
 
-  async getSessionScreenshot(sessionName: string = 'default'): Promise<ScreenshotResponse> {
-    const url = `/api/screenshot?session=${encodeURIComponent(sessionName)}`;
-
-    try {
-      // 1. JSON (Base64File)
-      const jsonResp = await this.client.get(url, {
-        headers: { accept: 'application/json' },
-        responseType: 'json',
-        validateStatus: () => true,
-      });
-
-      if (jsonResp.status === 200 && jsonResp.data) {
-        return { format: 'json', data: jsonResp.data };
-      }
-
-      // 2. JPEG binary
-      const jpegResp = await this.client.get(url, {
-        headers: { accept: 'image/jpeg' },
-        responseType: 'arraybuffer',
-        validateStatus: () => true,
-      });
-
-      if (jpegResp.status === 200 && jpegResp.data) {
-        const base64 = Buffer.from(jpegResp.data, 'binary').toString('base64');
-        return { format: 'jpeg', data: `data:image/jpeg;base64,${base64}` };
-      }
-
-      console.warn('[WAHA][SCREENSHOT] Non-200 for both JSON and JPEG', {
-        jsonStatus: jsonResp.status,
-        jpegStatus: jpegResp.status,
-      });
-
-      throw new Error('Screenshot endpoint returned non-200');
-    } catch (error: any) {
-      console.error('[WAHA][SCREENSHOT] Failed to get screenshot:', error?.response?.data || error?.message);
-      throw new Error(`Failed to get session screenshot: ${error?.message || 'Unknown error'}`);
+    async getSessionStatus(sessionId: string) {
+        const session = this.sessions.get(sessionId);
+        if (!session) return { status: 'STOPPED' };
+        
+        return {
+            status: session.status,
+            me: { id: session.phone }
+        };
     }
-  }
 
-  async getSessionStatus(sessionName: string = 'default') {
-    try {
-      const response = await this.client.get(`/api/sessions/${encodeURIComponent(sessionName)}`);
-      return response.data;
-    } catch (error: any) {
-      console.error('[WAHA] Failed to get session status:', error?.response?.data || error?.message);
-      throw new Error(`Failed to get session status: ${error?.message || 'Unknown error'}`);
+    async getQRCode(sessionId: string) {
+        const session = this.sessions.get(sessionId);
+        if (!session || !session.qr) {
+            throw new Error('QR code not available or session already connected');
+        }
+        return { format: 'raw', data: session.qr };
     }
-  }
 
-  async listSessions() {
-    try {
-      const response = await this.client.get('/api/sessions');
-      return response.data;
-    } catch (error: any) {
-      console.error('[WAHA] Failed to list sessions:', error?.response?.data || error?.message);
-      throw new Error(`Failed to list sessions: ${error?.message || 'Unknown error'}`);
+    async getSessionScreenshot(sessionId: string) {
+        // Fallback for session.routes.ts mapping
+        return this.getQRCode(sessionId);
     }
-  }
 
-  // ===== Messaging =====
-
-  async sendTextMessage(sessionName: string, phoneNumber: string, text: string) {
-    try {
-      const response = await this.client.post('/api/sendText', {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-        text,
-      });
-      return response.data;
-    } catch (error: any) {
-      const msg = this.formatAxiosError(error);
-      console.error('[WAHA] Failed to send text message:', msg);
-      throw new Error(`Failed to send text message: ${msg}`);
+    async stopSession(sessionId: string) {
+        const session = this.sessions.get(sessionId);
+        if (session) {
+            session.sock.end(undefined);
+            session.status = 'STOPPED';
+        }
+        return { success: true };
     }
-  }
 
-  async sendImageMessage(
-    sessionName: string,
-    phoneNumber: string,
-    imageUrl: string,
-    caption?: string
-  ) {
-    try {
-      const response = await this.client.post('/api/sendImage', {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-        file: {
-          url: imageUrl,
-        },
-        caption,
-      });
-      return response.data;
-    } catch (error: any) {
-      const msg = this.formatAxiosError(error);
-      console.error('[WAHA] Failed to send image message:', msg);
-      throw new Error(`Failed to send image message: ${msg}`);
+    async logoutSession(sessionId: string) {
+        const session = this.sessions.get(sessionId);
+        if (session) {
+            await session.sock.logout();
+            session.status = 'STOPPED';
+        }
+        const sessionDir = this.getSessionDir(sessionId);
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+        }
+        return { success: true };
     }
-  }
 
-  async sendButtonMessage(
-    sessionName: string,
-    phoneNumber: string,
-    text: string,
-    buttons: Array<{ id: string; text: string }>,
-    imageUrl?: string
-  ) {
-    try {
-      const payload: any = {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-        text,
-        buttons,
-      };
-
-      if (imageUrl) {
-        payload.footer = '';
-        payload.image = { url: imageUrl };
-      }
-
-      const response = await this.client.post('/api/sendButtons', payload);
-      return response.data;
-    } catch (error: any) {
-      const msg = this.formatAxiosError(error);
-      console.error('[WAHA] Failed to send button message:', msg);
-      throw new Error(`Failed to send button message: ${msg}`);
+    async deleteSession(sessionId: string) {
+        return this.logoutSession(sessionId);
     }
-  }
 
-  // Send message - buttons parameter ignored for safety (reduces ban risk)
-  // Function signature kept for backward compatibility
-  async sendMessageWithButtons(
-    sessionName: string,
-    phoneNumber: string,
-    message: string,
-    imageUrl: string | null,
-    buttons: Array<{ label: string; url: string }> // Ignored - kept for compatibility
-  ) {
-    try {
-      // Send plain text or image message only (no button processing)
-      // URLs in message text are automatically clickable in WhatsApp
-      if (imageUrl) {
-        return await this.sendImageMessage(sessionName, phoneNumber, imageUrl, message);
-      }
-
-      return await this.sendTextMessage(sessionName, phoneNumber, message);
-    } catch (error: any) {
-      const msg = this.formatAxiosError(error);
-      console.error('[WAHA] Failed to send message:', msg);
-      throw new Error(`Failed to send message: ${msg}`);
+    async requestPairingCode(sessionId: string, phoneNumber: string) {
+        const session = this.sessions.get(sessionId);
+        if (!session) throw new Error('Session not found or not started');
+        
+        const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+        const code = await session.sock.requestPairingCode(cleanNumber);
+        return { code };
     }
-  }
 
-  // ===== Human-like Behavior (Anti-Ban) =====
+    // High Speed Message Sending (60/s)
+    async sendMessageWithButtons(
+        sessionId: string,
+        phoneNumber: string,
+        text: string,
+        imageUrl: string | null = null,
+        buttons: { label: string; url: string }[] = []
+    ) {
+        const session = this.sessions.get(sessionId);
+        if (!session || session.status !== 'WORKING') {
+            throw new Error('Session is not connected');
+        }
 
-  /**
-   * Send typing indicator to simulate human typing
-   * @param sessionName - Session name
-   * @param phoneNumber - Target phone number
-   * @param durationMs - How long to show typing (will auto-stop)
-   */
-  async sendTypingIndicator(
-    sessionName: string,
-    phoneNumber: string,
-    durationMs: number = 3000
-  ): Promise<boolean> {
-    try {
-      // Start typing
-      await this.client.post('/api/startTyping', {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-      });
+        const jid = `${phoneNumber.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+        
+        let messageConfig: any = {};
 
-      console.log(`[WAHA] Typing indicator started for ${phoneNumber} (${durationMs}ms)`);
+        // Convert UI generic buttons into actual WhatsApp Buttons/Template/Interactive
+        // NOTE: Standard Baileys buttons require standard WhatsApp Interactive Message structure.
+        // For mass sending safety and speed, plain text + URLs is best. But let's support it if needed.
+        if (buttons && buttons.length > 0) {
+            // Very basic CTAs - Baileys implementation of buttons can be tricky 
+            // depending on Meta's current rules. We'll send standard text with links appended 
+            // for maximum 60/s stabillity, or use the interactive template.
+            const buttonText = buttons.map(b => `[${b.label}] ${b.url}`).join('\n');
+            text = `${text}\n\n${buttonText}`;
+        }
 
-      // User Request: removed artificial sleep for simultaneous 0-delay sending
-      // await new Promise((r) => setTimeout(r, durationMs));
+        if (imageUrl) {
+            messageConfig = {
+                image: { url: imageUrl },
+                caption: text
+            };
+        } else {
+            messageConfig = { text };
+        }
 
-      // Stop typing (fire immediately after start to not block the node thread)
-      await this.client.post('/api/stopTyping', {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-      });
-
-      return true;
-    } catch (error: any) {
-      // Non-fatal error - don't throw, just log
-      console.warn('[WAHA] Typing indicator failed:', error?.response?.data || error?.message);
-      return false;
+        // Direct Socket Send 🚀
+        const sentMsg = await session.sock.sendMessage(jid, messageConfig);
+        return { id: sentMsg?.key.id };
     }
-  }
-
-  /**
-   * Mark chat as seen (read receipt / blue tick)
-   * @param sessionName - Session name
-   * @param phoneNumber - Target phone number
-   */
-  async markChatAsSeen(sessionName: string, phoneNumber: string): Promise<boolean> {
-    try {
-      await this.client.post('/api/sendSeen', {
-        session: sessionName,
-        chatId: `${phoneNumber}@c.us`,
-      });
-
-      console.log(`[WAHA] Chat marked as seen: ${phoneNumber}`);
-      return true;
-    } catch (error: any) {
-      // Non-fatal error - don't throw, just log
-      console.warn('[WAHA] Mark seen failed:', error?.response?.data || error?.message);
-      return false;
-    }
-  }
-
-  /**
-   * Set presence/status (online, offline, typing, recording)
-   * @param sessionName - Session name
-   * @param state - Presence state
-   */
-  async setPresence(
-    sessionName: string,
-    state: 'available' | 'unavailable' = 'available'
-  ): Promise<boolean> {
-    try {
-      // WAHA Plus presence endpoint
-      await this.client.post('/api/setPresence', {
-        session: sessionName,
-        presence: state === 'available' ? 'online' : 'offline',
-      });
-
-      console.log(`[WAHA] Presence set to ${state} for session ${sessionName}`);
-      return true;
-    } catch (error: any) {
-      // Non-fatal error - don't throw, just log
-      console.warn('[WAHA] Set presence failed:', error?.response?.data || error?.message);
-      return false;
-    }
-  }
-
-  /**
-   * Check if a phone number is registered on WhatsApp
-   * Useful to avoid sending to invalid numbers
-   */
-  async checkNumberExists(sessionName: string, phoneNumber: string): Promise<boolean> {
-    try {
-      const response = await this.client.get('/api/checkNumberStatus', {
-        params: {
-          session: sessionName,
-          phone: phoneNumber,
-        },
-      });
-
-      const exists = response.data?.numberExists === true || response.data?.exists === true;
-      console.log(`[WAHA] Number ${phoneNumber} exists: ${exists}`);
-      return exists;
-    } catch (error: any) {
-      console.warn('[WAHA] Check number failed:', error?.response?.data || error?.message);
-      // Assume exists to avoid blocking - non-critical feature
-      return true;
-    }
-  }
 }
 
-const wahaService = new WahaService();
-export default wahaService;
-
+const baileysService = new BaileysService();
+export default baileysService;

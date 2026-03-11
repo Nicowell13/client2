@@ -58,55 +58,7 @@ services:
     # Redis config: 200MB RAM, No Eviction (Safe for Queues)
     command: redis-server --maxmemory 200mb --maxmemory-policy noeviction --stop-writes-on-bgsave-error no --save ""
 
-  # WAHA Plus with NOWEB engine (lightweight)
-  waha:
-    image: devlikeapro/waha-plus:latest
-    container_name: whatsapp-waha
-    ports:
-      - "3000:3000"
-    environment:
-      # WAHA Configuration
-      - WAHA_PRINT_QR=True
-      - WHATSAPP_API_PORT=3000
-      - WHATSAPP_API_HOSTNAME=0.0.0.0
-      
-      # Security
-      - WHATSAPP_API_KEY=${WAHA_API_KEY:-5014d2db2fcf48019e4aee140286480a}
-      
-      # WAHA Plus License
-      - WAHA_LICENSE_KEY=${WAHA_LICENSE_KEY:-your-license-key-here}
-      
-      # Session configuration
-      - WHATSAPP_RESTART_ALL_SESSIONS=True
-      - WHATSAPP_START_SESSIONS=session_1,session_2,session_3,session_4,session_5,session_6,session_7,session_8,session_9,session_10
-      
-      # WEBJS engine is often more stable for multi-session than NOWEB, but uses more RAM.
-      # However, for 10 sessions on 2GB RAM, we might need to stick to NOWEB or carefully tune.
-      # User asked for "1 corfee 2gig" and "kit tidak menggunakan low mem".
-      # So we can try WEBJS or just stick to NOWEB but with higher limits.
-      # Let's keep NOWEB as it is most efficient for 10 sessions on 2GB.
-      - WHATSAPP_DEFAULT_ENGINE=NOWEB
-      
-      # Webhook - Removed 'message' and 'message.any' to save resources
-      - WHATSAPP_HOOK_EVENTS=state.change,session.status,message.ack
-      - WHATSAPP_HOOK_URL=http://backend:4000/webhook/whatsapp
-      
-      # Files
-      - WHATSAPP_FILES_FOLDER=/app/files
-      - WHATSAPP_FILES_LIFETIME=60
-      
-    volumes:
-      - waha_data:/app/.sessions
-      - waha_files:/app/files
-    networks:
-      - whatsapp-network
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
+
 
   # Express Backend API
   backend:

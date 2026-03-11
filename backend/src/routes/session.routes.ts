@@ -40,7 +40,7 @@ router.post('/', async (req: Request, res: Response) => {
         data: {
           name,
           sessionId:
-            (wahaSession && (wahaSession.name || wahaSession.session || wahaSession.sessionId)) ||
+            (wahaSession && (wahaSession as any).sessionId) ||
             name,
           status: 'starting',
           isDefault: true,
@@ -229,34 +229,11 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
 
     // 1) Coba QR endpoint
     try {
-      const qrResp = await wahaService.getQRCode(session.sessionId);
+      const qrResp = (await wahaService.getQRCode(session.sessionId)) as any;
       let dataUrl: string | null = null;
 
-      if (qrResp.format === 'json') {
-        // WAHA base64 format (docs): { mimetype: 'image/png', data: 'base64...' }
-        const mime = qrResp.data?.mimetype;
-        const data = qrResp.data?.data;
-        if (mime && data) {
-          dataUrl = `data:${mime};base64,${data}`;
-        } else {
-          // Legacy/variant keys
-          const base64 =
-            qrResp.data?.base64 || qrResp.data?.qr || qrResp.data?.image;
-          if (base64) {
-            dataUrl = base64.startsWith('data:')
-              ? base64
-              : `data:image/png;base64,${base64}`;
-          }
-        }
-      } else if (qrResp.format === 'png') {
+      if (qrResp.format === 'raw' && qrResp.data) {
         dataUrl = qrResp.data;
-      } else if (qrResp.format === 'raw') {
-        // WAHA raw format (docs): { value: '...' }
-        const rawValue =
-          typeof qrResp.data === 'string'
-            ? qrResp.data
-            : (qrResp.data?.value as string | undefined);
-        if (rawValue) dataUrl = rawValue;
       }
 
       if (dataUrl) {
@@ -270,25 +247,11 @@ router.get('/:id/qr', async (req: Request, res: Response) => {
     }
 
     // 2) Screenshot fallback
-    const shot = await wahaService.getSessionScreenshot(session.sessionId);
+    const shot = (await wahaService.getSessionScreenshot(session.sessionId)) as any;
     let dataUrl: string | null = null;
 
-    if (shot.format === 'jpeg') {
-      dataUrl = shot.data; // sudah data URL
-    } else if (shot.format === 'json') {
-      // WAHA base64 screenshot format (docs): { mimetype: 'image/png', data: 'base64...' }
-      const mime = shot.data?.mimetype;
-      const data = shot.data?.data;
-      if (mime && data) {
-        dataUrl = `data:${mime};base64,${data}`;
-      } else {
-        const base64 = shot.data?.base64 || shot.data?.file?.base64 || null;
-        if (base64) {
-          dataUrl = base64.startsWith('data:')
-            ? base64
-            : `data:image/jpeg;base64,${base64}`;
-        }
-      }
+    if (shot.format === 'raw' && shot.data) {
+        dataUrl = shot.data;
     }
 
     if (!dataUrl) {
