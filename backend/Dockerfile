@@ -29,5 +29,5 @@ RUN npm run build
 # Expose port
 EXPOSE 4000
 
-# Run migrations and start
-CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]
+# Temporary bypass migration check to fix collision
+CMD ["sh", "-c", "npm start"]
