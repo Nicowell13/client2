@@ -59,6 +59,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: whatsapp-backend-${INSTANCE_NUM:-1}
+    ports:
+      - "${PORT_BACKEND:-4000}:4000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://${POSTGRES_USER:-whatsapp_user}:${POSTGRES_PASSWORD:-whatsapp_pass}@postgres:5432/${POSTGRES_DB:-whatsapp_db}?connection_limit=50
