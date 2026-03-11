@@ -60,8 +60,11 @@ function random(min: number, max: number) {
 //return 1.5; // Di luar jam kerja: sangat lambat (jika masih berjalan)
 //}
 
-function calcMessageDelay(index: number): number {
-  return 0; // User request: ubah delay antar pesan menjadi nol
+export function calcMessageDelay(index: number): number {
+  // Linear delay: 1000ms / 50 pesanan = 20ms per pesan
+  // Pesan ke-0 = 0ms, Pesan ke-1 = 20ms, Pesan ke-2 = 40ms, dst.
+  // Ini mendistribusikan 50 pesan secara sangat merata dalam 1 detik.
+  return index * 20; 
 }
 
 function batchCooldown(batchIndex: number): number {
@@ -350,7 +353,7 @@ async function processCampaignJob(job: Bull.Job<CampaignJob>) {
 
         if (failoverSession) {
           console.log(`✅ Failover found: ${failoverSession.sessionId}. Re-queueing job.`);
-          
+
           await prisma.message.updateMany({
             where: { campaignId, contactId, status: 'pending' },
             data: {

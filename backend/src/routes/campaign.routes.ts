@@ -3,7 +3,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import wahaService from '../services/waha.service';
-import { getCampaignQueue } from '../services/queue.service';
+import { getCampaignQueue, calcMessageDelay } from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
 import { executeAutoCampaigns } from '../services/auto-campaign.service';
 import { recoverFailedCampaigns } from '../services/campaign-recovery.service';
@@ -288,6 +288,7 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           batchIndex: 0,
         }, {
           jobId: `${campaign.id}_${c.id}`,
+          delay: calcMessageDelay(globalIndex), // Jeda progresif: 0, 20, 40, 60 ms...
           removeOnComplete: 100,
           removeOnFail: 50,
         })
