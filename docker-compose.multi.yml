@@ -68,7 +68,7 @@ services:
       - WAHA_API_KEY=${WAHA_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - PORT=4000
-      - GLOBAL_SEND_CONCURRENCY=25
+      - GLOBAL_SEND_CONCURRENCY=60
 
       # Broadcast timing (no restriction)
       - BROADCAST_START_HOUR=0
