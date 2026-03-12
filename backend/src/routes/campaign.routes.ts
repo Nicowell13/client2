@@ -3,7 +3,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import wahaService from '../services/waha.service';
-import { getCampaignQueue, calcMessageDelay } from '../services/queue.service';
+import { getCampaignQueue } from '../services/queue.service';
 import { authMiddleware } from '../middleware/auth';
 import { executeAutoCampaigns } from '../services/auto-campaign.service';
 import { recoverFailedCampaigns } from '../services/campaign-recovery.service';
@@ -45,7 +45,6 @@ router.post('/', async (req: Request, res: Response) => {
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        // Persist multi-variant messages, but keep `message` as required fallback
         message: finalMessage,
         variants: cleanedMessages,
         imageUrl: imageUrl || null,
@@ -130,7 +129,9 @@ router.get('/messages/all', async (_req: Request, res: Response) => {
 });
 
 /* ===========================================================
-   SEND CAMPAIGN (WITH AUTO BATCH 500)
+   SEND CAMPAIGN — 🚀 NINJA BURST MODE (Promise.all direct fire)
+   Bypasses Bull Queue entirely. All sock.sendMessage() calls
+   fire in a SINGLE event loop tick via Promise.all().
 =========================================================== */
 router.post('/:id/send', async (req: Request, res: Response) => {
   try {
@@ -161,7 +162,6 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     ---------------------------- */
     try {
       const status = await wahaService.getSessionStatus(session.sessionId);
-
       await prisma.session.update({
         where: { id: session.id },
         data: {
@@ -169,14 +169,12 @@ router.post('/:id/send', async (req: Request, res: Response) => {
           phoneNumber: status?.me?.id || session.phoneNumber,
         },
       });
-
       session.status = status?.status || session.status;
     } catch (e) {
-      console.warn('[CAMPAIGN][STATUS] WAHA unreachable, using old status');
+      console.warn('[CAMPAIGN][STATUS] Baileys status check failed, using cached status');
     }
 
     const normalized = (session.status || '').toLowerCase();
-
     if (!['working', 'ready', 'authenticated'].includes(normalized)) {
       return res.status(400).json({
         success: false,
@@ -184,23 +182,14 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       });
     }
 
-    // Session resting/limit checks removed (burst mode - no limits)
-
     /* ---------------------------
        GET CONTACTS
     ---------------------------- */
-    const where =
-      contactIds && contactIds.length > 0
-        ? { id: { in: contactIds } }
-        : {};
-
+    const where = contactIds && contactIds.length > 0 ? { id: { in: contactIds } } : {};
     const contacts = await prisma.contact.findMany({ where });
 
     if (contacts.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No contacts found',
-      });
+      return res.status(400).json({ success: false, message: 'No contacts found' });
     }
 
     // Save message placeholder rows
@@ -212,18 +201,12 @@ router.post('/:id/send', async (req: Request, res: Response) => {
       })),
     });
 
-    /* ---------------------------
-       UPDATE CAMPAIGN STATUS
-    ---------------------------- */
+    // Update campaign status
     await prisma.campaign.update({
       where: { id },
-      data: {
-        status: 'sending',
-        totalContacts: contacts.length,
-      },
+      data: { status: 'sending', totalContacts: contacts.length },
     });
 
-    // Emit campaign update event
     emitCampaignUpdate({
       campaignId: id,
       status: 'sending',
@@ -233,84 +216,126 @@ router.post('/:id/send', async (req: Request, res: Response) => {
     });
 
     /* ===========================================================
-       >>>>>>>>>>>>>> SESSION-BASED DISTRIBUTION (150 per session) <<<<<<<<<<<<<<
+       🚀🚀🚀 NINJA BURST: DIRECT Promise.all() — NO BULL QUEUE 🚀🚀🚀
+       All messages fire through the WebSocket at the EXACT same
+       millisecond. This replicates Ninja WA Sender behavior.
     ============================================================ */
 
-    // Get all healthy sessions
     const healthySessions = await sessionRotation.getAllHealthySessions();
-
     if (healthySessions.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tidak ada session yang available. Semua session sedang resting, suspend, atau tidak terhubung.',
-      });
+      return res.status(400).json({ success: false, message: 'Tidak ada session yang available.' });
     }
 
-    // 🚀 BURST MODE: Each session fires 200 messages simultaneously
-    // Meta bypass: all messages sent at the exact same millisecond
-    const CONTACTS_PER_SESSION = Number(process.env.GLOBAL_SEND_CONCURRENCY || 200);
-    const maxContacts = healthySessions.length * CONTACTS_PER_SESSION;
+    const BURST_SIZE = Number(process.env.GLOBAL_SEND_CONCURRENCY || 200);
+    console.log(`🚀 [NINJA-BURST] Firing ${contacts.length} messages via Promise.all() (burst size: ${BURST_SIZE})`);
+    console.log(`🚀 [NINJA-BURST] Sessions: ${healthySessions.map(s => s.name).join(', ')}`);
 
-    console.log(`[CAMPAIGN] ${healthySessions.length} sessions × ${CONTACTS_PER_SESSION} contacts = ${maxContacts} max simultaneous sends`);
-    console.log(`[CAMPAIGN] Sessions: ${healthySessions.map(s => s.name).join(', ')}`);
+    const btns = campaign.buttons.map((b) => ({ label: b.label, url: b.url }));
 
-    const btns = campaign.buttons.map((b) => ({
-      label: b.label,
-      url: b.url,
-    }));
-
-    // Use global queue for all sessions
-    const campaignQueue = getCampaignQueue('global');
-
-    // Distribute contacts across sessions (150 per session, round-robin)
-    const jobPromises: Promise<any>[] = [];
-
-    for (let i = 0; i < contacts.length; i++) {
-      const c = contacts[i];
-      const globalIndex = i;
-
-      // Sequential variant selection
-      const selectedMessage = variants[globalIndex % variants.length];
-
-      // Round-robin: each session gets 150 contacts
-      const selectedSession = healthySessions[globalIndex % healthySessions.length];
-
-      // Add all jobs in parallel (no await per job)
-      jobPromises.push(
-        campaignQueue.add({
-          campaignId: campaign.id,
-          contactId: c.id,
-          phoneNumber: c.phoneNumber,
-          message: selectedMessage,
-          imageUrl: campaign.imageUrl,
-          buttons: btns,
-          sessionName: selectedSession.sessionId,
-          messageIndex: i,
-          batchIndex: 0,
-        }, {
-          jobId: `${campaign.id}_${c.id}`,
-          delay: calcMessageDelay(globalIndex), // Jeda progresif: 0, 20, 40, 60 ms...
-          removeOnComplete: 100,
-          removeOnFail: 50,
-        })
-      );
-    }
-
-    // Enqueue all jobs simultaneously
-    await Promise.all(jobPromises);
-
-    /* ---------------------------
-       RESPONSE
-    ---------------------------- */
-    return res.json({
+    // Respond immediately — sending happens in background
+    res.json({
       success: true,
-      message: `Campaign queued: ${contacts.length} contacts across ${healthySessions.length} sessions (${CONTACTS_PER_SESSION} per session)`,
+      message: `🚀 NINJA BURST: ${contacts.length} messages firing simultaneously!`,
       data: {
         totalContacts: contacts.length,
         totalSessions: healthySessions.length,
-        contactsPerSession: CONTACTS_PER_SESSION,
+        burstSize: BURST_SIZE,
       },
     });
+
+    // ===============================
+    // BACKGROUND: Fire all messages in batches of BURST_SIZE
+    // Each batch uses Promise.all() for TRUE simultaneous sending
+    // ===============================
+    (async () => {
+      let sentCount = 0;
+      let failedCount = 0;
+
+      for (let batchStart = 0; batchStart < contacts.length; batchStart += BURST_SIZE) {
+        const batch = contacts.slice(batchStart, batchStart + BURST_SIZE);
+
+        console.log(`🚀 [NINJA-BURST] Firing batch ${Math.floor(batchStart / BURST_SIZE) + 1}: ${batch.length} messages simultaneously`);
+
+        // 🔥 THE KEY: Promise.all() fires ALL sendMessage() calls in ONE event loop tick
+        const results = await Promise.allSettled(
+          batch.map(async (contact, idx) => {
+            const globalIndex = batchStart + idx;
+            const selectedMessage = variants[globalIndex % variants.length];
+            const selectedSession = healthySessions[globalIndex % healthySessions.length];
+
+            try {
+              // Process message template
+              let finalMessage = selectedMessage
+                .replace(/\{name\}/gi, contact.name || '')
+                .replace(/\{phone\}/gi, contact.phoneNumber || '');
+
+              // 🚀 DIRECT SOCKET SEND — no queue, no delay, no DB check before send
+              const result = await wahaService.sendMessageWithButtons(
+                selectedSession.sessionId,
+                contact.phoneNumber,
+                finalMessage,
+                campaign.imageUrl,
+                btns
+              );
+
+              const waMessageId = result?.id || null;
+
+              // Mark as sent (async, doesn't block next send)
+              await prisma.message.updateMany({
+                where: { campaignId: campaign.id, contactId: contact.id, status: 'pending' },
+                data: { status: 'sent', waMessageId, sentAt: new Date() },
+              });
+
+              sentCount++;
+              return { success: true, contactId: contact.id };
+            } catch (err: any) {
+              await prisma.message.updateMany({
+                where: { campaignId: campaign.id, contactId: contact.id, status: 'pending' },
+                data: { status: 'failed', errorMsg: (err?.message || 'Unknown error').substring(0, 200) },
+              });
+              failedCount++;
+              return { success: false, contactId: contact.id, error: err?.message };
+            }
+          })
+        );
+
+        // Update campaign stats after each burst batch
+        await prisma.campaign.update({
+          where: { id: campaign.id },
+          data: { sentCount, failedCount },
+        });
+
+        emitCampaignUpdate({
+          campaignId: campaign.id,
+          status: 'sending',
+          sentCount,
+          failedCount,
+          totalContacts: contacts.length,
+        });
+
+        console.log(`✅ [NINJA-BURST] Batch done: ${sentCount} sent, ${failedCount} failed`);
+      }
+
+      // Mark campaign as completed
+      await prisma.campaign.update({
+        where: { id: campaign.id },
+        data: { status: 'sent' },
+      });
+
+      emitCampaignUpdate({
+        campaignId: campaign.id,
+        status: 'sent',
+        sentCount,
+        failedCount,
+        totalContacts: contacts.length,
+      });
+
+      console.log(`🎉 [NINJA-BURST] Campaign ${campaign.id} COMPLETE: ${sentCount} sent, ${failedCount} failed out of ${contacts.length}`);
+    })().catch(err => {
+      console.error(`❌ [NINJA-BURST] Fatal error:`, err);
+    });
+
+    return;
   } catch (error: any) {
     console.error('[CAMPAIGN][SEND]', error);
     return res.status(500).json({
@@ -332,10 +357,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       data: { name, message, imageUrl },
     });
 
-    // Replace buttons
     if (buttons) {
       await prisma.button.deleteMany({ where: { campaignId: req.params.id } });
-
       await prisma.button.createMany({
         data: buttons.slice(0, 2).map((btn: any, i: number) => ({
           campaignId: req.params.id,
@@ -364,11 +387,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     await prisma.campaign.delete({ where: { id: req.params.id } });
-
-    return res.json({
-      success: true,
-      message: 'Campaign deleted successfully',
-    });
+    return res.json({ success: true, message: 'Campaign deleted successfully' });
   } catch (error: any) {
     console.error('[CAMPAIGN][DELETE]', error);
     return res.status(500).json({ success: false, message: error.message });
@@ -381,11 +400,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.post('/auto-execute', async (req: Request, res: Response) => {
   try {
     const { delayBetweenCampaigns } = req.body;
-
     const result = await executeAutoCampaigns({
-      delayBetweenCampaigns: delayBetweenCampaigns
-        ? Number(delayBetweenCampaigns)
-        : undefined,
+      delayBetweenCampaigns: delayBetweenCampaigns ? Number(delayBetweenCampaigns) : undefined,
     });
 
     return res.json({
@@ -398,10 +414,7 @@ router.post('/auto-execute', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[CAMPAIGN][AUTO-EXECUTE]', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to execute auto campaigns',
-    });
+    return res.status(500).json({ success: false, message: error.message || 'Failed to execute auto campaigns' });
   }
 });
 
@@ -411,7 +424,6 @@ router.post('/auto-execute', async (req: Request, res: Response) => {
 router.post('/recover', async (_req: Request, res: Response) => {
   try {
     const result = await recoverFailedCampaigns();
-
     return res.json({
       success: result.success,
       message: result.success
@@ -425,10 +437,7 @@ router.post('/recover', async (_req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[CAMPAIGN][RECOVER]', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to recover campaigns',
-    });
+    return res.status(500).json({ success: false, message: error.message || 'Failed to recover campaigns' });
   }
 });
 
@@ -438,8 +447,6 @@ router.post('/recover', async (_req: Request, res: Response) => {
 router.post('/clear-queue', async (_req: Request, res: Response) => {
   try {
     const campaignQueue = getCampaignQueue('global');
-
-    // Get queue stats before clearing
     const waiting = await campaignQueue.getWaitingCount();
     const active = await campaignQueue.getActiveCount();
     const delayed = await campaignQueue.getDelayedCount();
@@ -447,7 +454,6 @@ router.post('/clear-queue', async (_req: Request, res: Response) => {
 
     console.log(`[QUEUE] Before clear: waiting=${waiting}, active=${active}, delayed=${delayed}, failed=${failed}`);
 
-    // Clear all jobs
     await campaignQueue.empty();
     await campaignQueue.clean(0, 'delayed');
     await campaignQueue.clean(0, 'wait');
@@ -460,21 +466,11 @@ router.post('/clear-queue', async (_req: Request, res: Response) => {
     return res.json({
       success: true,
       message: 'Queue cleared successfully',
-      data: {
-        clearedJobs: {
-          waiting,
-          active,
-          delayed,
-          failed
-        }
-      }
+      data: { clearedJobs: { waiting, active, delayed, failed } },
     });
   } catch (error: any) {
     console.error('[QUEUE][CLEAR]', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to clear queue',
-    });
+    return res.status(500).json({ success: false, message: error.message || 'Failed to clear queue' });
   }
 });
 
