@@ -139,8 +139,9 @@ async function sendCampaignRoundRobin(
       return { success: false, error: 'No contacts found', sessionsUsed: 0 };
     }
 
-    // Distribute via Baileys directly
-    console.log(`[AUTO-CAMPAIGN] Distributing ${contacts.length} contacts across ${allSessions.length} sessions (Ninja WA Speed: 60/sec)`);
+    // Each session handles 150 contacts
+    const CONTACTS_PER_SESSION = 150;
+    console.log(`[AUTO-CAMPAIGN] Distributing ${contacts.length} contacts across ${allSessions.length} sessions (${CONTACTS_PER_SESSION} per session)`);
 
     // Update campaign status
     try {

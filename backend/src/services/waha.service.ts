@@ -9,9 +9,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import QRCode from 'qrcode';
 import { emitSessionUpdate } from './socket.service';
-import prisma from '../lib/prisma'; // Optional: if you update DB directly from here, but usually caller does it.
 
 const logger = Pino({ level: 'silent' });
+
+interface ProxyConfig {
+    enabled: boolean;
+    type: 'socks5' | 'http' | 'https';
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+}
 
 interface SessionData {
     sock: ReturnType<typeof makeWASocket>;
@@ -23,10 +31,64 @@ interface SessionData {
 class BaileysService {
     private sessions: Map<string, SessionData> = new Map();
     private sessionsDir = path.join(process.cwd(), 'sessions');
+    private proxyConfig: ProxyConfig | null = null;
 
     constructor() {
         if (!fs.existsSync(this.sessionsDir)) {
             fs.mkdirSync(this.sessionsDir, { recursive: true });
+        }
+        // Load proxy config from settings file on startup
+        this.loadProxyFromSettings();
+    }
+
+    private loadProxyFromSettings() {
+        try {
+            const settingsFile = path.join(process.cwd(), 'settings.json');
+            if (fs.existsSync(settingsFile)) {
+                const raw = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+                if (raw.proxy && raw.proxy.enabled) {
+                    this.proxyConfig = raw.proxy;
+                    console.log(`[BAILEYS] 🌐 Proxy loaded: ${raw.proxy.type}://${raw.proxy.host}:${raw.proxy.port}`);
+                }
+            }
+        } catch (e) {
+            console.warn('[BAILEYS] Could not load proxy settings:', e);
+        }
+    }
+
+    updateProxy(config: ProxyConfig) {
+        this.proxyConfig = config.enabled ? config : null;
+        console.log(`[BAILEYS] 🌐 Proxy ${config.enabled ? `updated: ${config.type}://${config.host}:${config.port}` : 'DISABLED'}`);
+    }
+
+    private async getProxyAgent(): Promise<any> {
+        if (!this.proxyConfig || !this.proxyConfig.enabled) return undefined;
+
+        const { type, host, port, username, password } = this.proxyConfig;
+
+        if (type === 'socks5') {
+            try {
+                const { SocksProxyAgent } = await import('socks-proxy-agent');
+                const auth = username && password ? `${username}:${password}@` : '';
+                const proxyUrl = `socks5://${auth}${host}:${port}`;
+                console.log(`[BAILEYS] 🌐 Using SOCKS5 proxy: ${host}:${port}`);
+                return new SocksProxyAgent(proxyUrl);
+            } catch (e) {
+                console.error('[BAILEYS] Failed to create SOCKS5 agent:', e);
+                return undefined;
+            }
+        } else {
+            // HTTP/HTTPS proxy
+            try {
+                const { HttpsProxyAgent } = await import('https-proxy-agent');
+                const auth = username && password ? `${username}:${password}@` : '';
+                const proxyUrl = `${type}://${auth}${host}:${port}`;
+                console.log(`[BAILEYS] 🌐 Using HTTP proxy: ${host}:${port}`);
+                return new HttpsProxyAgent(proxyUrl);
+            } catch (e) {
+                console.error('[BAILEYS] Failed to create HTTP proxy agent:', e);
+                return undefined;
+            }
         }
     }
 
@@ -44,9 +106,12 @@ class BaileysService {
 
         const sessionDir = this.getSessionDir(sessionId);
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-        const { version, isLatest } = await fetchLatestBaileysVersion();
+        const { version } = await fetchLatestBaileysVersion();
 
-        const sock = makeWASocket({
+        // 🌐 Get proxy agent if configured
+        const agent = await this.getProxyAgent();
+
+        const socketConfig: any = {
             version,
             logger,
             printQRInTerminal: false,
@@ -55,8 +120,17 @@ class BaileysService {
                 keys: makeCacheableSignalKeyStore(state.keys, logger),
             },
             generateHighQualityLinkPreview: true,
-            browser: ['WA Broadcast V2', 'Chrome', '1.0.0'], // Mimic Ninja
-        });
+            browser: ['Chrome (Linux)', 'Chrome', '120.0.0'], // Mimic real Chrome browser
+        };
+
+        // Apply proxy agent if available
+        if (agent) {
+            socketConfig.agent = agent;
+            socketConfig.fetchAgent = agent;
+            console.log(`[BAILEYS] 🌐 Session ${sessionId} using residential proxy`);
+        }
+
+        const sock = makeWASocket(socketConfig);
 
         const sessionData: SessionData = {
             sock,
@@ -95,7 +169,6 @@ class BaileysService {
                 
                 if (shouldReconnect) {
                     sessionData.status = 'STARTING';
-                    // Optional backoff reconnect
                     setTimeout(() => this.startSession(sessionId), 5000);
                 } else {
                     sessionData.status = 'STOPPED';
@@ -141,7 +214,6 @@ class BaileysService {
     }
 
     async getSessionScreenshot(sessionId: string) {
-        // Fallback for session.routes.ts mapping
         return this.getQRCode(sessionId);
     }
 
@@ -180,7 +252,7 @@ class BaileysService {
         return { code };
     }
 
-    // High Speed Message Sending (60/s)
+    // High Speed Message Sending
     async sendMessageWithButtons(
         sessionId: string,
         phoneNumber: string,
@@ -197,13 +269,7 @@ class BaileysService {
         
         let messageConfig: any = {};
 
-        // Convert UI generic buttons into actual WhatsApp Buttons/Template/Interactive
-        // NOTE: Standard Baileys buttons require standard WhatsApp Interactive Message structure.
-        // For mass sending safety and speed, plain text + URLs is best. But let's support it if needed.
         if (buttons && buttons.length > 0) {
-            // Very basic CTAs - Baileys implementation of buttons can be tricky 
-            // depending on Meta's current rules. We'll send standard text with links appended 
-            // for maximum 60/s stabillity, or use the interactive template.
             const buttonText = buttons.map(b => `[${b.label}] ${b.url}`).join('\n');
             text = `${text}\n\n${buttonText}`;
         }

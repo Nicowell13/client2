@@ -10,7 +10,8 @@ import {
   Phone,
   LogOut,
   Menu,
-  X
+  X,
+  Settings
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -39,6 +40,7 @@ export default function Sidebar({ user }: SidebarProps) {
     { name: 'Contacts', href: '/contacts', icon: Users },
     { name: 'Messages', href: '/messages', icon: Send },
     { name: 'WhatsApp Sessions', href: '/sessions', icon: Phone },
+    { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
   const isActive = (href: string) => {

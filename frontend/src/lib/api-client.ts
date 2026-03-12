@@ -163,3 +163,27 @@ export const uploadAPI = {
     });
   },
 };
+
+// =========================
+// SETTINGS API
+// =========================
+export const settingsAPI = {
+  getSettings: () => api.get('/api/settings'),
+
+  updateProxy: (data: {
+    enabled: boolean;
+    type: string;
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+  }) => api.put('/api/settings/proxy', data),
+
+  testProxy: (data: {
+    type: string;
+    host: string;
+    port: number;
+    username: string;
+    password: string;
+  }) => api.post('/api/settings/proxy/test', data),
+};

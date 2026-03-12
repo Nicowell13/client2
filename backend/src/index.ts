@@ -9,6 +9,7 @@ import sessionRoutes from './routes/session.routes';
 import contactRoutes from './routes/contact.routes';
 import campaignRoutes from './routes/campaign.routes';
 import webhookRoutes from './routes/webhook.routes';
+import settingsRoutes from './routes/settings.routes';
 import uploadRoutes from './routes/upload.routes';
 
 // Middleware
@@ -53,6 +54,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Webhook harus diterima RAW untuk WAHA event
 // Atur sebelum errorHandler supaya tidak ditangkap sebagai error
