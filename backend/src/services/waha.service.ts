@@ -150,8 +150,11 @@ class BaileysService {
                 console.log(`[BAILEYS] QR generated for ${sessionId}`);
                 try {
                     const qrDataUrl = await QRCode.toDataURL(qr);
-                    sessionData.qr = qrDataUrl;
-                    sessionData.status = 'STARTING';
+                    const currentSession = this.sessions.get(sessionId);
+                    if (currentSession) {
+                        currentSession.qr = qrDataUrl;
+                        currentSession.status = 'STARTING';
+                    }
                     
                     emitSessionUpdate({
                         sessionId,
@@ -164,15 +167,27 @@ class BaileysService {
             }
 
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
-                console.log(`[BAILEYS] Session ${sessionId} closed. Reconnect: ${shouldReconnect}`);
+                const isExplicitlyStopped = !this.sessions.has(sessionId);
+                const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+                const shouldReconnect = !isExplicitlyStopped && statusCode !== DisconnectReason.loggedOut;
+                console.log(`[BAILEYS] Session ${sessionId} closed. (Code: ${statusCode}) Reconnect: ${shouldReconnect}`);
                 
                 if (shouldReconnect) {
-                    sessionData.status = 'STARTING';
-                    setTimeout(() => this.startSession(sessionId), 5000);
+                    const currentSession = this.sessions.get(sessionId);
+                    if (currentSession) currentSession.status = 'STARTING';
+                    setTimeout(() => {
+                        // Check again before actually starting, in case it was stopped during the 5s timeout
+                        if (this.sessions.has(sessionId)) {
+                             this.startSession(sessionId);
+                        }
+                    }, 5000);
                 } else {
-                    sessionData.status = 'STOPPED';
-                    sessionData.qr = null;
+                    const currentSession = this.sessions.get(sessionId);
+                    if (currentSession) {
+                        currentSession.status = 'STOPPED';
+                        currentSession.qr = null;
+                        this.sessions.delete(sessionId);
+                    }
                     if (fs.existsSync(sessionDir)) {
                         fs.rmSync(sessionDir, { recursive: true, force: true });
                     }
@@ -220,6 +235,7 @@ class BaileysService {
     async stopSession(sessionId: string) {
         const session = this.sessions.get(sessionId);
         if (session) {
+            this.sessions.delete(sessionId);
             session.sock.end(undefined);
             session.status = 'STOPPED';
         }
@@ -229,7 +245,8 @@ class BaileysService {
     async logoutSession(sessionId: string) {
         const session = this.sessions.get(sessionId);
         if (session) {
-            await session.sock.logout();
+            this.sessions.delete(sessionId);
+            await session.sock.logout().catch(() => {});
             session.status = 'STOPPED';
         }
         const sessionDir = this.getSessionDir(sessionId);
